@@ -1,0 +1,9 @@
+模型来源与授权记录
+==================
+
+assault-rifle.glb
+  名称: Assault Rifle
+  作者: Quaternius
+  授权: CC0 (Public Domain，可自由使用、无需署名)
+  来源: https://poly.pizza/m/Bgvuu4CUMV
+  下载日期: 2026-07-18

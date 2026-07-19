@@ -1,0 +1,5 @@
+# 视频素材（个人参考用，不入库：体积大且涉及第三方版权）
+*.mp4
+.DS_Store
+node_modules/
+.backup/
