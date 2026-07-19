@@ -2,6 +2,9 @@
 
 ![游戏画面](docs/screenshot.png)
 
+> Built with [Kimi K3](https://www.moonshot.cn/) & Kimi Code —— 本游戏由 Kimi K3 模型
+> 与 Kimi Code CLI 结对开发：玩法设计、编码、测试验证、平衡调优全流程参与。
+
 模仿《和平精英》攻山模式的单机网页 3D 射击游戏：4v4（你 + 3 个 AI 队友 vs 4 个 AI 敌人），
 五局三胜，每回合攻守互换，争夺中央雪山山顶。Minecraft 像素风：
 程序化方块阶梯地形 + canvas 像素贴图 + MC 比例关节角色（另有经典平滑画风，V 键切换）。
