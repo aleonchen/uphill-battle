@@ -1,5 +1,7 @@
 # Uphill Battle · 攻山
 
+**在线玩：https://aleonchen.work/uphill-battle/**（GitHub Pages，无需下载）
+
 ![游戏画面](docs/screenshot.png)
 
 > Built with [Kimi K3](https://www.moonshot.cn/) & Kimi Code —— 本游戏由 Kimi K3 模型
