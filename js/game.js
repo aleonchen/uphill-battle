@@ -193,6 +193,13 @@ export class Game {
       if (v.driver) v.seatPos(v.driver.pos);
     }
     this.grenades.update(dt);
+    this._updateRamming();
+    // 载具残血冒烟（<40%）
+    for (const v of this.vehicles) {
+      if (!v.wrecked && v.hp < v.hpMax * 0.4 && Math.random() < dt * 3) {
+        this.effects.smoke(new THREE.Vector3(v.pos.x, v.pos.y + 1.2, v.pos.z), 0x8a8f94);
+      }
+    }
 
     // 每帧杂项：行走动画、枪口闪光熄灭、头顶血槽字段
     for (const a of this.actors) {
@@ -486,6 +493,39 @@ export class Game {
     if (target.hp <= 0) {
       target.hp = 0;
       this.down(target, attacker);
+    }
+  }
+
+  // ---------------- 载具伤害（打爆/爆炸波及/撞人碾压） ----------------
+  damageVehicle(v, dmg, attacker) {
+    if (v.wrecked) return;
+    v.hp -= dmg * 1.5;
+    if (v.hp <= 0) {
+      v.hp = 0;
+      v.wrecked = true;
+      v.speed = 0;
+      if (v.driver) this._eject(v.driver); // 先弹下车，爆炸再结算（车里人照样挨炸）
+      v.setWrecked();
+      this.grenades.explodeAt(new THREE.Vector3(v.pos.x, v.pos.y + 0.8, v.pos.z), attacker);
+    }
+  }
+
+  // 高速载具碾压路径上的角色：伤害随车速（≈直接撞倒），撞完减速；不分敌我
+  _updateRamming() {
+    for (const v of this.vehicles) {
+      if (v.wrecked || Math.abs(v.speed) < 5) continue;
+      for (const a of this.actors) {
+        if (a.state !== 'alive' || a === v.driver) continue;
+        if (this.now < (a._ramCd || 0)) continue;
+        const dx = a.pos.x - v.pos.x, dz = a.pos.z - v.pos.z;
+        if (dx * dx + dz * dz > 2.2 * 2.2) continue;
+        a._ramCd = this.now + 1;
+        const dmg = clamp(Math.abs(v.speed) * 7, 30, 140);
+        this.applyDamage(a, dmg, v.driver || null, false);
+        v.speed *= 0.55;
+        Audio.play('ram', { dist: a.isPlayer ? 0 : a.pos.distanceTo(this.player.pos) });
+        break; // 每帧最多撞一个
+      }
     }
   }
 

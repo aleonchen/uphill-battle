@@ -19,6 +19,7 @@ function buildBuggy() {
   const body = new THREE.MeshLambertMaterial({ color: 0xb8433a });
   const dark = new THREE.MeshLambertMaterial({ color: 0x2b2b2f });
   const frame = new THREE.MeshLambertMaterial({ color: 0x555b63 });
+  const mats = { body, dark, frame };
 
   const add = (mat, w, h, d, x, y, z) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -46,7 +47,7 @@ function buildBuggy() {
     g.add(w);
     wheels.push(w);
   }
-  return { group: g, frontWheels: [wheels[0], wheels[1]], wheels };
+  return { group: g, frontWheels: [wheels[0], wheels[1]], wheels, mats };
 }
 
 export class Vehicle {
@@ -57,10 +58,15 @@ export class Vehicle {
     this.speed = 0;
     this.steerVis = 0;      // 前轮转向视觉
     this.driver = null;     // 驾驶员 actor（目前只有玩家会上车）
+    this.hpMax = 600;       // 载具血量：步枪约 17 发打爆（1.5 倍承伤系数）
+    this.hp = this.hpMax;
+    this.wrecked = false;   // 已损毁：不可用、外观熏黑，下回合 reset 恢复
     const b = buildBuggy();
     this.group = b.group;
     this.frontWheels = b.frontWheels;
     this.wheels = b.wheels;
+    this.mats = b.mats;
+    this._origColors = { body: 0xb8433a, dark: 0x2b2b2f, frame: 0x555b63 };
     scene.add(this.group);
     this.reset();
   }
@@ -70,11 +76,24 @@ export class Vehicle {
     this.yaw = Math.atan2(-this.pos.x, -this.pos.z); // 面朝山
     this.speed = 0;
     this.driver = null;
+    this.hp = this.hpMax;
+    this.wrecked = false;
+    this.mats.body.color.setHex(this._origColors.body);
+    this.mats.dark.color.setHex(this._origColors.dark);
+    this.mats.frame.color.setHex(this._origColors.frame);
     this.syncMesh(0);
+  }
+
+  // 打爆后的残骸外观（熏黑）
+  setWrecked() {
+    this.mats.body.color.setHex(0x1d1d1f);
+    this.mats.dark.color.setHex(0x0d0d0f);
+    this.mats.frame.color.setHex(0x141416);
   }
 
   // input: { fwd: -1..1, steer: -1..1 } 或 null（无人乘坐时惯性滑行）
   update(dt, input) {
+    if (this.wrecked) { this.speed = 0; this.syncMesh(0); return; } // 残骸不动
     const fwd = input ? input.fwd : 0;
     const steer = input ? input.steer : 0;
 

@@ -86,6 +86,27 @@ function rayCovers(o, d) {
   return best;
 }
 
+// 射线与载具求交：转到载具本地系做 AABB slab（半宽 1.05 / 高 0~1.7 / 半长 1.45）
+function rayVehicle(o, d, v) {
+  const dx = o.x - v.pos.x, dy = o.y - v.pos.y, dz = o.z - v.pos.z;
+  const c = Math.cos(-v.yaw), s = Math.sin(-v.yaw);
+  const lx = dx * c - dz * s, lz = dx * s + dz * c;
+  const dlx = d.x * c - d.z * s, dlz = d.x * s + d.z * c;
+  let t0 = -Infinity, t1 = Infinity;
+  const slab = (p, dp, lo, hi) => {
+    if (Math.abs(dp) < 1e-9) return p >= lo && p <= hi;
+    let ta = (lo - p) / dp, tb = (hi - p) / dp;
+    if (ta > tb) { const tmp = ta; ta = tb; tb = tmp; }
+    t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+    return true;
+  };
+  if (!slab(lx, dlx, -1.05, 1.05)) return Infinity;
+  if (!slab(dy, d.y, 0, 1.7)) return Infinity;
+  if (!slab(lz, dlz, -1.45, 1.45)) return Infinity;
+  if (t1 < t0 || t1 <= 0) return Infinity;
+  return t0 > 0 ? t0 : Infinity;
+}
+
 // 沿射线与地形求交（步进 + 二分），返回 t
 function rayTerrain(o, d) {
   let t = 1.0;
@@ -132,24 +153,28 @@ function hitActor(o, d, actor) {
 
 const _v1 = new THREE.Vector3();
 
-// 纯查询射线求交：地形 + 掩体（石/树）+ 角色（可排除），不造成伤害/特效。
-// 返回 { point, target, isHead, dist, onCover }，未命中返回 null
+// 纯查询射线求交：地形 + 掩体（石/树）+ 载具 + 角色（可排除），不造成伤害/特效。
+// 返回 { point, target, vehicle, isHead, dist, onCover }，未命中返回 null
 export function castRay(game, origin, dir, { excludeActor = null, excludeTeam = null } = {}) {
   const tTerr = rayTerrain(origin, dir);
   const tCov = rayCovers(origin, dir);
   let tHit = Math.min(tTerr, tCov);
   const onCover = tCov < tTerr; // 首个阻挡是掩体（而非地面）
-  let hitTarget = null, isHead = false;
+  let hitTarget = null, isHead = false, hitVehicle = null;
+  for (const v of game.vehicles || []) {
+    const t = rayVehicle(origin, dir, v);
+    if (t < tHit) { tHit = t; hitTarget = null; isHead = false; hitVehicle = v; }
+  }
   for (const actor of game.actors) {
     if (actor === excludeActor) continue;
     if (excludeTeam && actor.team === excludeTeam) continue;
     if (actor.state === 'dead') continue;
     const { t, isHead: head } = hitActor(origin, dir, actor);
-    if (t < tHit) { tHit = t; hitTarget = actor; isHead = head; }
+    if (t < tHit) { tHit = t; hitTarget = actor; isHead = head; hitVehicle = null; }
   }
   if (tHit === Infinity) return null;
   const point = dir.clone().multiplyScalar(tHit).add(origin);
-  return { point, target: hitTarget, isHead, dist: tHit, onCover: hitTarget ? false : onCover };
+  return { point, target: hitTarget, vehicle: hitVehicle, isHead, dist: tHit, onCover: (hitTarget || hitVehicle) ? false : onCover };
 }
 
 // 开火主逻辑：判定 + 伤害 + 特效。返回命中信息
@@ -160,17 +185,24 @@ export function fire(game, shooter, origin, dir, spread) {
 
   const end = hit ? hit.point : d.clone().multiplyScalar(MAX_RANGE).add(origin);
 
-  // 特效：曳光从枪口出发；命中角色冒绿烟，命中掩体石灰，命中地形尘雾按表面变色（雪地白/土岩灰）
+  // 特效：曳光从枪口出发；命中角色冒绿烟，命中载具金属火花，命中掩体石灰，命中地形尘雾按表面变色
   shooter.char.muzzle.getWorldPosition(_v1);
   game.effects.tracer(_v1, end);
   if (hit) {
     if (hit.target) {
       game.effects.smoke(end, 0x35d04a);
+    } else if (hit.vehicle) {
+      game.effects.spark(end, 0xffcf7a);
     } else if (hit.onCover) {
       game.effects.spark(end, 0x7d786f);
     } else {
       game.effects.spark(end, end.y > SNOW_LINE ? 0xf0f4fa : 0x8a857e);
     }
+  }
+
+  if (hit && hit.vehicle) {
+    game.damageVehicle(hit.vehicle, weapon.damage, shooter);
+    return { target: null, vehicle: hit.vehicle, isHead: false, point: end };
   }
 
   if (hit && hit.target) {

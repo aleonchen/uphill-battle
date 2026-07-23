@@ -119,9 +119,9 @@ export class PlayerController {
       Audio.engineStop();
       return;
     }
-    let best = null, bd = 16; // 4m 内最近空车
+    let best = null, bd = 16; // 4m 内最近空车（残骸不可上）
     for (const v of g.vehicles) {
-      if (v.driver) continue;
+      if (v.driver || v.wrecked) continue;
       const d = v.pos.distanceToSquared(p.pos);
       if (d < bd) { bd = d; best = v; }
     }
@@ -255,10 +255,14 @@ export class PlayerController {
     let tip = null;
     if (p && p.state === 'alive' && g.matchState === 'combat') {
       if (p.inVehicle) {
-        tip = 'F 下车 · W/S 油门刹车 · A/D 转向';
+        const v = p.inVehicle;
+        tip = v.wrecked
+          ? '载具已损毁 · F 下车'
+          : `F 下车 · W/S 油门刹车 · A/D 转向 · 车况 ${Math.ceil((v.hp / v.hpMax) * 100)}%`;
       } else {
         for (const v of g.vehicles) {
-          if (!v.driver && v.pos.distanceToSquared(p.pos) < 16) { tip = '按 F 上车'; break; }
+          if (v.driver || v.wrecked) continue;
+          if (v.pos.distanceToSquared(p.pos) < 16) { tip = '按 F 上车'; break; }
         }
       }
     }

@@ -184,6 +184,14 @@ class AudioSystem {
         this._burst({ dur: 0.9, peak: 0.18 * g, type: 'highpass', freq: 2500, q: 0.5 });
         break;
       }
+      case 'ram': { // 载具撞人：闷响
+        const dist = opts.dist || 0;
+        const g = dist <= 0 ? 1 : Math.max(0, 1 - dist / 60);
+        if (g < 0.05) return;
+        this._burst({ dur: 0.15, peak: 0.35 * g, type: 'lowpass', freq: 200 });
+        this._blip({ f0: 110, f1: 55, type: 'sine', dur: 0.12, peak: 0.2 * g });
+        break;
+      }
       case 'down':  // 己方倒地提示
         this._notes([520, 370], 0.12, 0.15, 0.22);
         break;

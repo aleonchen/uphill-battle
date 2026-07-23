@@ -73,6 +73,15 @@
 - 上车隐藏角色 mesh，但 `actor.pos` 每帧吸附座位（`v.seatPos`），命中框随车走——
   别再给车里的玩家单独摆姿态。
 - 上车瞬间把 `p.yaw/pitch` 掰到车头方向（司机视角），之后鼠标自由环顾；用户明确要求。
+- 载具战斗三件套（2026-07-19，和平精英规则）：
+  - **血量**：`v.hp = 600`，子弹承伤 ×1.5（步枪 ~17 发爆）；<40% 冒灰烟；
+    打爆 → `setWrecked()` 熏黑不可用（下回合 reset 恢复），爆炸复用 `grenades.explodeAt`
+    （**车里人照样挨炸**，先 `_eject` 再爆，击杀算 attacker 的）。
+  - **子弹命中**：`weapons.js rayVehicle`（载具本地系 AABB slab）进 `castRay`，
+    命中返回 `hit.vehicle`、金属火花；载具因此能给乘员挡子弹（头露出车窗可爆头）。
+  - **撞人**：`game._updateRamming()`，|speed|>5 且 2.2m 内 → 伤害 = speed×7（30~140，
+    ≈直接撞倒），不分敌我，撞完车速 ×0.55，每人 1s 冷却；残骸/低速不触发。
+  - 残骸不可上车（toggleVehicle 过滤）；车况 % 显示在驾驶提示里。
 - 倒地/死亡/回合重开都会 `_eject` 强制下车；引擎音效用 `Audio.engineStart/Update/Stop`。
 
 ## HUD 反馈（2026-07-18）

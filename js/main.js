@@ -251,6 +251,34 @@ if (__params.get('test') === 'grenade') {
 if (__params.has('healdemo')) { game.player.hp = 40; game.useMed(game.player, 'aid'); }
 if (__params.has('bagdemo')) hud.toggleBackpack(game, true);
 if (__params.has('reloaddemo')) { game.player.ammo[0].mag = 10; game.startReload(game.player); }
+// 调试：?test=ram 断言载具三件套：子弹命中载具/打爆+爆炸波及/撞人碾压（需配合 ff）
+if (__params.get('test') === 'ram') {
+  const p = game.player, v = game.vehicles[0];
+  const en = game.actors.find((a) => a.team === 'blue');
+  // 1) 子弹命中载具（从侧面水平射车身）
+  const o = new THREE.Vector3(v.pos.x - 8, v.pos.y + 0.8, v.pos.z);
+  const hit = castRay(game, o, new THREE.Vector3(1, 0, 0), {});
+  const bulletHitsVehicle = !!hit && hit.vehicle === v;
+  // 2) 打爆：血量下降 → 归零损毁，且爆炸波及旁边敌人
+  en.pos.set(v.pos.x + 3, 0, v.pos.z);
+  en.pos.y = heightAt(en.pos.x, en.pos.z);
+  en.hp = 100; en.state = 'alive';
+  const hp0 = v.hp;
+  game.damageVehicle(v, 50, p);
+  const damaged = v.hp < hp0;
+  game.damageVehicle(v, 9999, p);
+  const wrecked = v.wrecked;
+  const blastHurt = en.hp < 100;
+  // 3) 撞人：另一辆车高速撞上前方敌人
+  const v2 = game.vehicles[1];
+  en.hp = 100; en.state = 'alive';
+  en.pos.set(v2.pos.x + Math.sin(v2.yaw) * 4, 0, v2.pos.z + Math.cos(v2.yaw) * 4);
+  en.pos.y = heightAt(en.pos.x, en.pos.z);
+  v2.speed = 15;
+  game.update(1 / 20); // 车前行一步，应撞上
+  const ramHurt = en.hp < 100;
+  console.log('TEST-RAM ' + JSON.stringify({ bulletHitsVehicle, damaged, wrecked, blastHurt, ramHurt }));
+}
 // 调试：?test=heal 断言治疗引导/打断/上限/回满
 if (__params.get('test') === 'heal') {
   const p = game.player;
