@@ -1,4 +1,4 @@
-// 玩家控制：Pointer Lock 视角、WASD 移动、第三人称越肩相机（防穿地形）、射击/换弹/机瞄
+// 玩家控制：吃通用输入层（input.js，键盘/触控/未来手柄同构），第三人称越肩相机（防穿地形）
 import * as THREE from 'three';
 import { WEAPONS, castRay } from './weapons.js';
 import { Audio } from './audio.js';
@@ -10,12 +10,12 @@ const WALK_SPEED = 5.2, SPRINT_SPEED = 8.0, ADS_SPEED = 3.0;
 const NORMAL_FOV = 65, ADS_FOV = 42;
 
 export class PlayerController {
-  constructor(game, camera, dom) {
+  constructor(game, camera, input, sources, dom) {
     this.game = game;
     this.camera = camera;
-    this.dom = dom;
-    this.keys = new Set();
-    this.shooting = false;
+    this.input = input;       // 通用输入层（InputState + 事件队列）
+    this.sources = sources;   // 输入源列表，每帧 poll（触控源可后补注入）
+    this.dom = dom;           // 仅用于 Pointer Lock 请求
     this.ads = false;
     this.fov = NORMAL_FOV;
     this.camPos = new THREE.Vector3();
@@ -34,7 +34,6 @@ export class PlayerController {
     this._wantDir = new THREE.Vector3();
     this._parentQuat = new THREE.Quaternion();
     this._zAxis = new THREE.Vector3(0, 0, 1);
-    this.bindInput();
   }
 
   // 画风切换等场景：相机状态清零，下一帧直接吸附到合法位置（不做旧位置平滑）
@@ -45,48 +44,25 @@ export class PlayerController {
     this.liftY = 0;
   }
 
-  bindInput() {
-    const dom = this.dom;
-    window.addEventListener('keydown', (e) => {
-      if (e.repeat) return;
-      this.keys.add(e.code);
-      const g = this.game, p = g.player;
-      if (!p) return;
-      if (e.code === 'KeyR') g.startReload(p);
-      if (e.code === 'Digit1') g.switchWeapon(p, 0);
-      if (e.code === 'Digit2') g.switchWeapon(p, 1);
-      if (e.code === 'Digit3') g.useMed(p, 'aid'); // 急救箱
-      if (e.code === 'Digit4') g.useMed(p, 'med'); // 全能医疗箱
-      if (e.code === 'Tab') { e.preventDefault(); this.toggleBackpack(); }
-      if (e.code === 'KeyE') g.input.reviveHeld = true;
-      if (e.code === 'KeyF') this.toggleVehicle(); // 上/下载具
-      if (e.code === 'KeyG') this.throwNade('frag');   // 手榴弹
-      if (e.code === 'KeyH') this.throwNade('smoke');  // 烟雾弹
-      if (e.code === 'KeyM') g.hud.setMute(Audio.toggleMuted()); // 静音切换
-      if (e.code === 'KeyV') g.toggleTerrainMode(); // 画风切换（经典/方块）
-      if (e.code === 'Space') e.preventDefault();
-    });
-    window.addEventListener('keyup', (e) => {
-      this.keys.delete(e.code);
-      if (e.code === 'KeyE') this.game.input.reviveHeld = false;
-    });
-    document.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement !== dom) return;
-      const p = this.game.player;
-      if (!p) return;
-      const sens = this.ads ? 0.0012 : 0.0022;
-      p.yaw -= e.movementX * sens;
-      p.pitch = clamp(p.pitch - e.movementY * sens, -1.2, 1.2);
-    });
-    dom.addEventListener('mousedown', (e) => {
-      if (document.pointerLockElement !== dom) return;
-      if (e.button === 0) this.shooting = true;
-      if (e.button === 2) this.ads = !this.ads; // 点按切换机瞄（再按关闭）
-    });
-    window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.shooting = false;
-    });
-    dom.addEventListener('contextmenu', (e) => e.preventDefault());
+  // 每帧最前：轮询输入源连续状态 + 消费动作事件队列
+  _handleEvents() {
+    for (const s of this.sources) s.poll();
+    const g = this.game, p = g.player;
+    const evs = this.input.drain();
+    if (!p) return;
+    for (const ev of evs) {
+      switch (ev.type) {
+        case 'reload': g.startReload(p); break;
+        case 'weapon': g.switchWeapon(p, ev.data); break;
+        case 'med': g.useMed(p, ev.data); break;
+        case 'throw': this.throwNade(ev.data); break;
+        case 'interact': this.toggleVehicle(); break;
+        case 'backpack': this.toggleBackpack(); break;
+        case 'mute': g.hud.setMute(Audio.toggleMuted()); break;
+        case 'terrain': g.toggleTerrainMode(); break;
+        case 'ads': if (!p.inVehicle) this.ads = !this.ads; break; // 点按切换机瞄
+      }
+    }
   }
 
   // G/H 投掷：沿相机朝向抛出（驾驶中禁用，避免车速叠加出鬼畜弹道）
@@ -128,7 +104,7 @@ export class PlayerController {
     if (best) {
       best.driver = p;
       p.inVehicle = best;
-      this.shooting = false;
+      this.input.state.fire = false;
       this.ads = false;
       // 上车直接切到司机视角：面朝车头方向平视（之后鼠标仍可自由环顾）
       p.yaw = best.yaw;
@@ -139,18 +115,13 @@ export class PlayerController {
     }
   }
 
-  // 驾驶中：WASD 转给载具输入，跳过步行/开火/跳跃
+  // 驾驶中：移动向量转油门/转向，跳过步行/开火/跳跃
   updateDriving(dt) {
     const g = this.game, p = g.player, v = p.inVehicle;
     let fwd = 0, steer = 0;
     if (g.matchState === 'combat') {
       if (this.debugDrive) { fwd = 1; steer = 0.12; } // 调试：无头模拟驾驶（main.js ?drive）
-      else {
-        if (this.keys.has('KeyW')) fwd += 1;
-        if (this.keys.has('KeyS')) fwd -= 1;
-        if (this.keys.has('KeyA')) steer -= 1;
-        if (this.keys.has('KeyD')) steer += 1;
-      }
+      else { fwd = this.input.moveZ; steer = this.input.moveX; }
     }
     g.vehicleInput.fwd = fwd;
     g.vehicleInput.steer = steer;
@@ -159,10 +130,19 @@ export class PlayerController {
     Audio.engineUpdate(Math.abs(v.speed) / 17);
   }
 
-  // 每帧更新：移动 + 开火 + 相机
+  // 每帧更新：输入 → 移动 + 开火 + 相机
   update(dt) {
     const g = this.game, p = g.player;
+    this._handleEvents();
     if (!p) return;
+    const inp = this.input;
+
+    // 视角（键鼠=Pointer Lock 增量 / 触控=滑屏增量，同一消费口）
+    const look = inp.takeLook();
+    const sens = this.ads ? 0.0012 : 0.0022;
+    p.yaw -= look.dx * sens;
+    p.pitch = clamp(p.pitch - look.dy * sens, -1.2, 1.2);
+
     if (p.inVehicle) {
       this.updateDriving(dt);
       this.updateCamera(dt);
@@ -171,17 +151,13 @@ export class PlayerController {
     }
     const inCombat = g.matchState === 'combat';
 
-    // ---- 移动（仅战斗中且存活） ----
+    // ---- 移动（仅战斗中且存活；模拟量：键盘 0/1，摇杆 0..1） ----
     let ix = 0, iz = 0;
-    if (inCombat && p.state === 'alive') {
-      if (this.keys.has('KeyW')) iz += 1;
-      if (this.keys.has('KeyS')) iz -= 1;
-      if (this.keys.has('KeyA')) ix -= 1;
-      if (this.keys.has('KeyD')) ix += 1;
-    }
-    const moving = ix !== 0 || iz !== 0;
-    const sprint = this.keys.has('ShiftLeft') && !this.ads && iz > 0;
-    const speed = this.ads ? ADS_SPEED : sprint ? SPRINT_SPEED : WALK_SPEED;
+    if (inCombat && p.state === 'alive') { ix = inp.moveX; iz = inp.moveZ; }
+    const mag = Math.min(1, Math.hypot(ix, iz));
+    const moving = mag > 0.01;
+    const sprint = inp.sprint && !this.ads && iz > 0;
+    const speed = (this.ads ? ADS_SPEED : sprint ? SPRINT_SPEED : WALK_SPEED) * Math.max(mag, 0.01);
     if (p.heal && moving) g.cancelHeal(p); // 移动打断治疗
     if (moving) {
       const sin = Math.sin(p.yaw), cos = Math.cos(p.yaw);
@@ -195,10 +171,11 @@ export class PlayerController {
       p.moving = false;
       p.sprinting = false;
     }
-    if (inCombat && p.state === 'alive' && this.keys.has('Space')) {
+    if (inCombat && p.state === 'alive' && inp.state.jump) {
       if (p.heal) g.cancelHeal(p); // 跳跃打断治疗
       g.tryJump(p);
     }
+    g.input.reviveHeld = inp.state.revive; // E 救援（按住）
     p.mesh.rotation.y = p.yaw; // 身体朝向始终跟视角
 
     // ---- 脚步：移动且落地时按步频播放 ----
@@ -214,7 +191,7 @@ export class PlayerController {
 
     // ---- 开火（第三人称视差对齐：相机射线取瞄准点，子弹从眼睛射向它） ----
     if (this.ads) p.aimUntil = g.now + 0.25; // 机瞄持枪前举
-    if (inCombat && p.state === 'alive' && this.shooting) {
+    if (inCombat && p.state === 'alive' && inp.state.fire) {
       if (p.heal) g.cancelHeal(p); // 开火打断治疗
       const w = WEAPONS[p.weaponIndex];
       let spread = this.ads ? w.adsSpread : w.spread;
@@ -234,7 +211,7 @@ export class PlayerController {
       }
     }
     // 后坐恢复：停火后视角缓慢回弹
-    if (!this.shooting && (p.recoil ?? 0) > 0) {
+    if (!inp.state.fire && (p.recoil ?? 0) > 0) {
       const rec = Math.min(p.recoil, 0.5 * dt);
       p.pitch = clamp(p.pitch - rec, -1.2, 1.2);
       p.recoil -= rec;

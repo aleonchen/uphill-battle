@@ -1,13 +1,16 @@
-// 入口：渲染器/场景/光照/天空/雪花、主循环、Pointer Lock 与开始/重开流程
+// 入口：渲染器/场景/光照/天空/雪花、主循环、输入层、Pointer Lock 与开始/重开流程
 import * as THREE from 'three';
 import { Game } from './game.js';
 import { HUD } from './hud.js';
 import { PlayerController } from './player.js';
 import { Audio } from './audio.js';
+import { Input, KeyboardMouseSource, TouchSource } from './input.js';
 import { activeColliders, heightAt, ROUTES, DEFENSE_POINTS } from './terrain.js';
 import { castRay } from './weapons.js';
 import { AIController, losClear } from './ai.js';
 import { clamp } from './utils.js';
+
+const __params = new URLSearchParams(location.search);
 
 // 渲染器
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -109,34 +112,79 @@ function updateSnow(dt, cam) {
 // 游戏对象
 const hud = new HUD();
 const game = new Game(scene, hud);
-const playerCtl = new PlayerController(game, camera, renderer.domElement);
+// 通用输入层：键盘源常驻；触控源随模式切换懒创建（?touch 或 last-input-wins 触发）
+const input = new Input(__params);
+const kbSource = new KeyboardMouseSource(input, renderer.domElement);
+let touchSource = null;
+const playerCtl = new PlayerController(game, camera, input, [kbSource], renderer.domElement);
 game.onTerrainModeChanged = () => playerCtl.resetCamera(); // 画风切换时相机复位
+
+const touchUI = document.getElementById('touch-ui');
+const muteEl = document.getElementById('mute-icon');
+input.onModeChanged = (m) => {
+  touchUI.classList.toggle('hidden', m !== 'touch');
+  // 触屏布局：静音键挪到左侧，避免和开火键重叠
+  muteEl.style.right = m === 'touch' ? 'auto' : '24px';
+  muteEl.style.left = m === 'touch' ? '24px' : 'auto';
+  if (m === 'touch' && !touchSource) {
+    touchSource = new TouchSource(input, touchUI);
+    playerCtl.sources.push(touchSource);
+  }
+  // 触屏设备保帧率：pixelRatio 降档
+  renderer.setPixelRatio(m === 'touch' ? Math.min(window.devicePixelRatio, 1.5) : Math.min(window.devicePixelRatio, 2));
+};
+input.onModeChanged(input.mode()); // 初始化显隐
+
+// 开始界面操作模式选择（自动/触屏/键鼠，记忆在 localStorage）
+for (const b of document.querySelectorAll('#mode-sel button')) {
+  if (b.dataset.m === input.pref) b.classList.add('on');
+  b.addEventListener('click', () => {
+    input.setPref(b.dataset.m);
+    for (const x of document.querySelectorAll('#mode-sel button')) x.classList.toggle('on', x === b);
+  });
+}
+// 快捷栏可点（触屏吃药/丢雷；键鼠解锁时也能点）
+for (const s of document.querySelectorAll('#quickbar .slot')) {
+  s.style.pointerEvents = 'auto';
+  s.addEventListener('pointerup', (e) => {
+    e.stopPropagation();
+    const k = s.dataset.k;
+    if (k === 'aid' || k === 'med') game.useMed(game.player, k);
+    else playerCtl.throwNade(k);
+  });
+}
+// 武器名可点：切换武器（触屏无 1/2 键）
+const wname = document.getElementById('weapon-name');
+wname.style.pointerEvents = 'auto';
+wname.addEventListener('pointerup', (e) => {
+  e.stopPropagation();
+  game.switchWeapon(game.player, game.player.weaponIndex === 0 ? 1 : 0);
+});
 // 背包面板点击用药：成功则关面板并恢复指针锁定
 hud._onUseMed = (t) => {
   if (game.useMed(game.player, t)) {
     hud.toggleBackpack(game, false);
-    renderer.domElement.requestPointerLock();
+    if (!input.isTouch()) renderer.domElement.requestPointerLock();
   }
 };
 
-// 开始 / 重开
+// 开始 / 重开（Pointer Lock 仅键鼠模式请求）
 document.getElementById('start-btn').addEventListener('click', () => {
   Audio.init(); // 用户手势内创建 AudioContext
   game.startMatch();
-  renderer.domElement.requestPointerLock();
+  if (!input.isTouch()) renderer.domElement.requestPointerLock();
 });
 document.getElementById('restart-btn').addEventListener('click', () => {
   location.reload();
 });
 
 // 调试：?autostart 直接开赛（无指针锁定，供无头截图/自动化测试）
-const __params = new URLSearchParams(location.search);
 if (__params.has('autostart')) {
   game.startMatch();
 }
 // 调试：?fire 开赛后自动开火（验证持枪/开火姿态）
 if (__params.has('fire')) {
-  setInterval(() => { playerCtl.shooting = game.matchState === 'combat'; }, 500);
+  setInterval(() => { input.state.fire = game.matchState === 'combat'; }, 500);
 }
 // 调试：?attack 强制玩家第 1 回合进攻（验证进攻出生点/载具）
 if (__params.has('attack')) {
@@ -157,10 +205,10 @@ if (__params.has('ff')) {
   game.matchState = 'combat';
   game.combatUntil = game.now + 270;
   hud.onCombatStart();
-  if (__params.has('fire')) playerCtl.shooting = true;
+  if (__params.has('fire')) input.state.fire = true;
   const secs = parseFloat(__params.get('ff')) || 5;
   for (let t = 0; t < secs; t += 1 / 60) { game.update(1 / 60); playerCtl.update(1 / 60); }
-  playerCtl.shooting = false;
+  input.state.fire = false;
 }
 // 调试：?report 在 ff 之后导出全员状态（位置/血量/状态），供无头分析交战节奏
 if (__params.has('report')) {
@@ -296,6 +344,61 @@ if (__params.get('test') === 'heal') {
   game._updateHeal(p);
   const medWorks = p.hp === 100 && p.bag.med === 0;
   console.log('TEST-HEAL ' + JSON.stringify({ started, cancelKeeps, aidWorks, denied, medWorks }));
+}
+// 调试：?test=aiheal 断言 AI 脱战残血会自己打药（配合 ff 进入 combat）
+if (__params.get('test') === 'aiheal') {
+  const bot = game.actors.find((a) => a.team === 'blue' && a.ai);
+  bot.pos.set(-150, 0, -150); // 挪到无人区：无视线目标
+  bot.pos.y = heightAt(bot.pos.x, bot.pos.z);
+  bot.hp = 30;
+  bot.lastHurtAt = game.now - 10;
+  const med0 = bot.bag.med, aid0 = bot.bag.aid;
+  let healedAt = null;
+  for (let t = 0; t < 10 && healedAt === null; t += 1 / 20) {
+    game.update(1 / 20);
+    if (bot.hp > 30) healedAt = t;
+  }
+  console.log('TEST-AIHEAL ' + JSON.stringify({
+    healed: bot.hp > 30, hp: Math.round(bot.hp),
+    consumed: (bot.bag.med < med0) || (bot.bag.aid < aid0),
+    within10s: healedAt !== null,
+  }));
+}
+// 调试：?test=input 断言输入层双源（键盘移动/事件队列/触控摇杆/滑屏视角）
+if (__params.get('test') === 'input') {
+  // 键盘源：W 前进 + R 事件
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+  kbSource.poll();
+  const kbdMove = input.moveZ === 1;
+  window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+  kbSource.poll();
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' }));
+  const evOk = input.events.some((e) => e.type === 'reload');
+  input.drain();
+  // 切触屏：懒创建触控源
+  input.setPref('touch');
+  const touchUIEl = document.getElementById('touch-ui');
+  const joy = document.getElementById('joystick');
+  const jr = joy.getBoundingClientRect();
+  const jx = jr.left + jr.width / 2, jy = jr.top + jr.height / 2;
+  const mkJoy = (type, y) => joy.dispatchEvent(new PointerEvent(type, {
+    pointerId: 99, clientX: jx, clientY: y, bubbles: true, pointerType: 'touch',
+  }));
+  mkJoy('pointerdown', jy);
+  mkJoy('pointermove', jy - 50); // 上推满
+  const touchMove = input.moveZ > 0.85 && input.sprint;
+  mkJoy('pointerup', jy - 50);
+  const joyRelease = input.moveZ === 0;
+  // 滑屏视角：右半屏拖动
+  const rx = window.innerWidth * 0.7, ry = 300;
+  const mkLook = (type, x) => touchUIEl.dispatchEvent(new PointerEvent(type, {
+    pointerId: 98, clientX: x, clientY: ry, bubbles: true, pointerType: 'touch',
+  }));
+  mkLook('pointerdown', rx);
+  mkLook('pointermove', rx + 60);
+  const lookOk = input.lookDX > 0;
+  input.setPref('auto');
+  console.log('TEST-INPUT ' + JSON.stringify({ kbdMove, evOk, touchMove, joyRelease, lookOk }));
 }
 // 调试：?test=balance&rounds=N 玩家也挂 AI（公平 4v4），20Hz 离屏快模 N 回合
 // （跨多场连续模拟，比赛结束自动重开），输出进攻方胜率（样本 ≥40 回合才有统计意义）

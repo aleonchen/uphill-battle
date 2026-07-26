@@ -34,8 +34,12 @@
 - `actor.bag = { aid, med, frag, smoke }`（每回合 2/1/2/2 补给），替代原 `nades` 字段。
 - 治疗引导 `actor.heal = { type, until, total }`：急救箱 5s → 回至 75（≥75 不可用），
   全能医疗箱 7s → 回满。**完成才扣物品，打断不消耗**；打断条件：移动/跳跃/开火/受击
-  （player.js 前三个、applyDamage 最后一个）。bot 不用药也不丢雷，玩家独享。
-- HUD 三件套：底部快捷栏（计数+激活高亮）、引导进度条、Tab 背包面板
+  （AI 侧由 `moveTo`/`tryFire`/`applyDamage` 统一取消，人机通用）。
+- **AI 也会打药**（2026-07-19）：无目标且 4s 未受击时，hp<60 用急救箱（→75）。
+  bot 背包只发 1 个急救箱、不发全能医疗箱（平衡测量：bot 全量补给把进攻胜率
+  从 53% 推到 67%——治疗对打波次的一方增益更大，且守方打药会离哨位；
+  砍到 aid×1 + med×0 后回到 ~56%）。全能医疗箱是玩家专属奢侈。
+- HUD 三件套：底部快捷栏（计数+激活高亮）、倒计时圈、Tab 背包面板
   （可点击用药；**打开背包会解锁指针 → 游戏暂停，这是刻意取舍**，pause-tip 让位）。
 - 倒计时圈 `hud.channel(label, num, p, color)`（2026-07-19，和平精英式）：
   换弹（黄）/治疗（绿）/救援（绿）统一走这一个组件，优先级 治疗 > 换弹 > 救援，
@@ -95,6 +99,23 @@
   地形底图离屏渲染一次（`_mmBg`）；动态画载具/队友/枪声点/玩家箭头
   （yaw→屏幕旋转角 = π − yaw）。`hud.updateOverheads(game, camera)` 签名是 game，别传错。
 
+## 输入层（2026-07-19，键盘/触控同构）
+
+- `js/input.js`：`Input`（连续状态 moveX/moveZ/sprint/state{fire,jump,revive} +
+  lookDX/DY 增量 + 动作事件队列）+ `KeyboardMouseSource` + `TouchSource`。
+  `player.js` 只消费 `input`，不碰 DOM 事件——**未来手柄源同构插入即可**
+  （写同样状态和事件）。动作一律走事件队列（reload/weapon/med/throw/interact/
+  backpack/mute/terrain/ads），连续态走 poll。
+- 模式判定（已定论）：`pointerType` last-input-wins，不做设备探测；
+  偏好 auto/touch/kbd 存 localStorage('ub-input-mode')，`?touch` 强制。
+  Pointer Lock 仅键鼠模式请求；触屏 pixelRatio 降 1.5；静音键挪左侧（避开火键）。
+- 触控布局（和平精英式）：左下摇杆（模拟量，推满疾跑）、右半屏滑屏视角、
+  右侧按钮集群（开火按住/瞄/跳/换弹/雷/烟）；快捷栏格子+武器名可点
+  （触屏无 1/2/3/4 键的补偿）。
+- 测试：`?test=input` 双源断言（键盘移动/事件队列/摇杆模拟量+推满疾跑/松手归零/滑屏视角）。
+- 注意：平衡模拟只跑 `game.update`，输入层改动**不可能**影响 BALANCE 数值；
+  若 BALANCE 波动，先看样本量（≥60 才有意义）。
+
 ## 攻守平衡（2026-07-19，大样本定稿）
 
 - 测试器：`?test=balance&rounds=N`——玩家也挂 AI（公平 4v4），20Hz 离屏快模，跨多场
@@ -109,6 +130,8 @@
 - 结论：守方"4 枪集火先露头者"才是进攻弱的主因；有效的"分散守方火力"是改
   守方 AI 的注意力分配（`ai.js sectorPoints` + `game.js _defenseAcceptsAlert`），
   不是改地图几何。地图不需要扩大。
+- AI 治疗的影响（2026-07-19 补测）：bot 全量补给（2 急救+1 医疗箱）→ 进攻 67%，
+  说明治疗对打波次的一方增益更大；砍到 bot 只带 1 个急救箱（无医疗箱）→ 回到 ~56%。
 - 之前的"45%"结论是小样本噪声，以本节为准。
 
 ## 回合与 AI

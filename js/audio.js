@@ -202,9 +202,11 @@ class AudioSystem {
         this._blip({ f0: 880, type: 'sine', dur: 0.09, peak: 0.2 });
         break;
       case 'heal_start': // 治疗开始：包扎窸窣
+        if (opts.dist && opts.dist > 40) return;
         this._burst({ dur: 0.25, peak: 0.1, type: 'bandpass', freq: 1400, q: 0.8 });
         break;
       case 'heal_done': // 治疗完成：上行两音
+        if (opts.dist && opts.dist > 40) return;
         this._notes([660, 880], 0.09, 0.1, 0.2);
         break;
       case 'round_win':

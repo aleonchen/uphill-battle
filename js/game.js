@@ -116,7 +116,11 @@ export class Game {
       actor.aimUntil = 0; actor.downedAt = 0; actor.deadAt = 0;
       actor.moving = false; actor.sprinting = false;
       actor.inVehicle = null; // 回合重开强制下车（载具在下方统一回位）
-      actor.bag.aid = 2; actor.bag.med = 1; actor.bag.frag = 2; actor.bag.smoke = 2;
+      // 背包补给：玩家 2/1/2/2；bot 只带 1 个急救箱（平衡：治疗对打波次的进攻方增益更大，
+      // 全能医疗箱留给玩家做特色）
+      actor.bag.aid = actor.isPlayer ? 2 : 1;
+      actor.bag.med = actor.isPlayer ? 1 : 0;
+      actor.bag.frag = 2; actor.bag.smoke = 2;
       actor.heal = null;
       resetPose(actor.char);
       actor.char.group.visible = true;
@@ -231,7 +235,7 @@ export class Game {
       case 'combat': {
         const p = this.player;
         if (p.reloadUntil > 0 && this.now >= p.reloadUntil) this.finishReload(p);
-        this._updateHeal(p);
+        for (const a of this.actors) this._updateHeal(a);
         for (const a of this.actors) if (a.ai) a.ai.update(dt);
         this.updateRevives(dt);
         this.updateBleedouts();
@@ -384,6 +388,7 @@ export class Game {
     if (actor.reloadUntil > 0 || this.now < actor.nextShot) return false;
     const mag = actor.ammo[actor.weaponIndex];
     if (mag.mag <= 0) { this.startReload(actor); return false; }
+    if (actor.heal) this.cancelHeal(actor); // 开火打断治疗（人机通用）
     const w = WEAPONS[actor.weaponIndex];
     actor.nextShot = this.now + 60 / w.rpm;
     mag.mag--;
@@ -426,11 +431,17 @@ export class Game {
   useMed(actor, type) {
     if (this.matchState !== 'combat' || actor.state !== 'alive') return false;
     if (actor.heal || actor.inVehicle || actor.bag[type] <= 0) return false;
-    if (type === 'aid' && actor.hp >= 75) { this.hud.toast('血量 ≥75，急救箱用不上'); return false; }
-    if (type === 'med' && actor.hp >= 100) { this.hud.toast('血量已满'); return false; }
+    if (type === 'aid' && actor.hp >= 75) {
+      if (actor.isPlayer) this.hud.toast('血量 ≥75，急救箱用不上');
+      return false;
+    }
+    if (type === 'med' && actor.hp >= 100) {
+      if (actor.isPlayer) this.hud.toast('血量已满');
+      return false;
+    }
     const total = type === 'aid' ? 5 : 7;
     actor.heal = { type, until: this.now + total, total };
-    Audio.play('heal_start');
+    Audio.play('heal_start', { dist: actor.isPlayer ? 0 : actor.pos.distanceTo(this.player.pos) });
     return true;
   }
 
@@ -446,7 +457,8 @@ export class Game {
     actor.heal = null;
     actor.bag[h.type]--;
     actor.hp = h.type === 'aid' ? Math.max(actor.hp, 75) : 100;
-    if (actor.isPlayer) { this.hud.toast(h.type === 'aid' ? '恢复至 75' : '完全恢复'); Audio.play('heal_done'); }
+    Audio.play('heal_done', { dist: actor.isPlayer ? 0 : actor.pos.distanceTo(this.player.pos) });
+    if (actor.isPlayer) this.hud.toast(h.type === 'aid' ? '恢复至 75' : '完全恢复');
   }
 
   switchWeapon(actor, idx) {
@@ -478,7 +490,7 @@ export class Game {
   // ---------------- 伤害 / 倒地 / 救援 ----------------
   applyDamage(target, dmg, attacker, isHead) {
     if (target.state === 'dead') return;
-    if (target.isPlayer && target.heal) this.cancelHeal(target); // 受击打断治疗
+    if (target.heal) this.cancelHeal(target); // 受击打断治疗（人机通用）
     if (target.state === 'downed') {
       // 倒地被攻击 → 加速流血
       target.bleedUntil -= 2.5;

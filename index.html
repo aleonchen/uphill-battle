@@ -2,12 +2,13 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Uphill Battle · 攻山</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0f14;
-    font-family: "PingFang SC", "Microsoft YaHei", sans-serif; user-select: none; }
+    font-family: "PingFang SC", "Microsoft YaHei", sans-serif; user-select: none;
+    touch-action: none; -webkit-user-select: none; }
   canvas { display: block; }
 
   /* ---------- HUD 通用 ---------- */
@@ -120,6 +121,33 @@
   .bp-item b { font-size: 14px; }
   .bp-item > span { float: right; color: #ffd76a; font-weight: 700; }
   .bp-item p { font-size: 12px; opacity: .7; margin-top: 3px; }
+
+  /* ---------- 触控 UI（?touch / last-input-wins 触发显示） ---------- */
+  #touch-ui { position: fixed; inset: 0; z-index: 5; touch-action: none; }
+  #joystick { position: absolute; left: 30px; bottom: 96px; width: 120px; height: 120px;
+    border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.3);
+    pointer-events: auto; }
+  #joy-knob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px;
+    margin: -26px 0 0 -26px; border-radius: 50%; background: rgba(255,255,255,.45); }
+  .tb { position: absolute; width: 58px; height: 58px; border-radius: 50%; border: none;
+    background: rgba(0,0,0,.45); color: #fff; font-size: 15px; pointer-events: auto;
+    touch-action: none; -webkit-tap-highlight-color: transparent; }
+  .tb:active { background: rgba(255,255,255,.3); }
+  .tb.big { width: 86px; height: 86px; font-size: 18px; background: rgba(176,48,40,.62); }
+  .tb[data-act=fire] { right: 38px; bottom: 104px; }
+  .tb[data-act=ads] { right: 146px; bottom: 98px; }
+  .tb[data-act=jump] { right: 44px; bottom: 208px; }
+  .tb[data-act=reload] { right: 146px; bottom: 176px; }
+  .tb[data-act=frag] { right: 232px; bottom: 152px; }
+  .tb[data-act=smoke] { right: 232px; bottom: 234px; }
+
+  /* 开始界面操作模式选择 */
+  #mode-sel { font-size: 13px; opacity: .9; margin-bottom: 24px; display: flex; gap: 8px;
+    align-items: center; }
+  #mode-sel button { pointer-events: auto; cursor: pointer; font-size: 13px; color: #fff;
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.3);
+    padding: 5px 16px; border-radius: 6px; }
+  #mode-sel button.on { background: rgba(255,215,106,.25); border-color: #ffd76a; }
 
   /* 全屏覆盖层 */
   .overlay { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column;
@@ -236,6 +264,17 @@
   <div id="mute-icon" class="hud">🔊</div>
   <div id="overheads" class="hud"></div>
 
+  <!-- 触控 UI（触屏模式显示） -->
+  <div id="touch-ui" class="hidden">
+    <div id="joystick"><div id="joy-knob"></div></div>
+    <button class="tb big" data-act="fire">开火</button>
+    <button class="tb" data-act="ads">瞄</button>
+    <button class="tb" data-act="jump">跳</button>
+    <button class="tb" data-act="reload">换弹</button>
+    <button class="tb" data-act="frag">雷</button>
+    <button class="tb" data-act="smoke">烟</button>
+  </div>
+
   <!-- 开始界面 -->
   <div id="start-screen" class="overlay">
     <h1>Uphill Battle</h1>
@@ -243,7 +282,12 @@
     <div class="controls">
       WASD 移动 &nbsp;|&nbsp; 鼠标左键 射击 &nbsp;|&nbsp; 右键 机瞄（点按切换） &nbsp;|&nbsp; R 换弹<br>
       1 / 2 切换武器 &nbsp;|&nbsp; G 手榴弹 &nbsp;|&nbsp; H 烟雾弹 &nbsp;|&nbsp; F 上/下载具<br>
-      Shift 疾跑 &nbsp;|&nbsp; 空格 跳跃 &nbsp;|&nbsp; E 救援倒地队友
+      Shift 疾跑 &nbsp;|&nbsp; 空格 跳跃 &nbsp;|&nbsp; E 救援倒地队友 &nbsp;|&nbsp; 触屏：摇杆+滑屏+按钮
+    </div>
+    <div id="mode-sel">操作：
+      <button data-m="auto">自动</button>
+      <button data-m="touch">触屏</button>
+      <button data-m="kbd">键鼠</button>
     </div>
     <button id="start-btn">点击开始</button>
     <div class="credit">Built with Kimi K3 &amp; Kimi Code</div>

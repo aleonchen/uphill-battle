@@ -140,6 +140,14 @@ export class AIController {
       if (this.updateCover(dt)) return;
     }
 
+    // 3.5) 治疗：脱战（无目标且 4s 未受击）且血量低 → 原地打药，完成前不动
+    if (a.heal) { this.state = 'heal'; a.moving = false; return; }
+    if (g.now - a.lastHurtAt > 4) {
+      if (a.hp < 45 && a.bag.med > 0) g.useMed(a, 'med');
+      else if (a.hp < 60 && a.bag.aid > 0) g.useMed(a, 'aid');
+      if (a.heal) { this.state = 'heal'; a.moving = false; return; }
+    }
+
     // 4) 分角色默认行为
     if (this.role === 'attack') this.updateAttack(dt);
     else this.updateDefense(dt);
@@ -287,6 +295,7 @@ export class AIController {
 
   moveTo(dest, dt, speed) {
     const a = this.actor;
+    if (a.heal) this.game.cancelHeal(a); // AI 一旦移动即中断治疗
     const dx = dest.x - a.pos.x, dz = dest.z - a.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < 0.5) { a.moving = false; return; }
