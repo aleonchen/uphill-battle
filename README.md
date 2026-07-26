@@ -1,6 +1,6 @@
 # Uphill Battle · 攻山
 
-**在线玩：https://aleonchen.work/uphill-battle/**（GitHub Pages，无需下载）
+** 在线玩：https://aleonchen.work/uphill-battle/  **（GitHub Pages，无需下载）
 
 ![游戏画面](docs/screenshot.png)
 
