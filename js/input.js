@@ -25,6 +25,19 @@ export class Input {
       if (saved === 'touch' || saved === 'kbd') this.pref = saved;
     }
     this.onModeChanged = null; // main.js 注册：切换触控 UI 显隐
+    this._bindAutoDetect();
+  }
+
+  // 自动检测：常驻全局监听（与触控源解耦——触控源要等 UI 显示才懒创建，
+  // 检测若依赖它则永远触发不了，iPad 实测踩坑）。
+  // 只用 pointer/touch 事件做判定：iPad 触摸后 Safari 会补发兼容性鼠标事件，
+  // 若键鼠源也参与判定会被合成事件误判回键鼠。
+  _bindAutoDetect() {
+    const note = (e) => this.notePointerType(e.pointerType);
+    window.addEventListener('pointerdown', note, { capture: true, passive: true });
+    window.addEventListener('pointermove', note, { capture: true, passive: true });
+    // 老 Safari（iOS 12-）无 pointer events 的兜底
+    window.addEventListener('touchstart', () => this.notePointerType('touch'), { capture: true, passive: true });
   }
 
   // 当前生效模式
@@ -87,13 +100,11 @@ export class KeyboardMouseSource {
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     document.addEventListener('mousemove', (e) => {
-      inp.notePointerType('mouse');
       if (document.pointerLockElement !== dom) return;
       inp.lookDX += e.movementX;
       inp.lookDY += e.movementY;
     });
     dom.addEventListener('mousedown', (e) => {
-      inp.notePointerType('mouse');
       if (document.pointerLockElement !== dom) return;
       if (e.button === 0) inp.state.fire = true;
       if (e.button === 2) inp.emit('ads');

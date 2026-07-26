@@ -398,7 +398,14 @@ if (__params.get('test') === 'input') {
   mkLook('pointermove', rx + 60);
   const lookOk = input.lookDX > 0;
   input.setPref('auto');
-  console.log('TEST-INPUT ' + JSON.stringify({ kbdMove, evOk, touchMove, joyRelease, lookOk }));
+  // 自动检测：auto 档下 window 收到 touch pointerdown → 应切到触屏
+  window.dispatchEvent(new PointerEvent('pointerdown', {
+    pointerId: 97, pointerType: 'touch', bubbles: true, clientX: 500, clientY: 300,
+  }));
+  const autoDetect = input.mode() === 'touch';
+  input.setPref('auto');
+  input.lastUsed = 'kbd';
+  console.log('TEST-INPUT ' + JSON.stringify({ kbdMove, evOk, touchMove, joyRelease, lookOk, autoDetect }));
 }
 // 调试：?test=balance&rounds=N 玩家也挂 AI（公平 4v4），20Hz 离屏快模 N 回合
 // （跨多场连续模拟，比赛结束自动重开），输出进攻方胜率（样本 ≥40 回合才有统计意义）
