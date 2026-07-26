@@ -11,7 +11,6 @@ import { AIController, losClear } from './ai.js';
 import { clamp } from './utils.js';
 
 const __params = new URLSearchParams(location.search);
-
 // 渲染器
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -118,6 +117,8 @@ const kbSource = new KeyboardMouseSource(input, renderer.domElement);
 let touchSource = null;
 const playerCtl = new PlayerController(game, camera, input, [kbSource], renderer.domElement);
 game.onTerrainModeChanged = () => playerCtl.resetCamera(); // 画风切换时相机复位
+// 调试钩子：CDP/控制台探测游戏与输入状态（触屏自动化测试用，勿删）
+window.__game = game; window.__input = input;
 
 const touchUI = document.getElementById('touch-ui');
 const muteEl = document.getElementById('mute-icon');

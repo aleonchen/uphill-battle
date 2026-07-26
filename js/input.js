@@ -115,9 +115,12 @@ export class KeyboardMouseSource {
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  // 每帧从按键重建连续状态
+  // 每帧从按键重建连续状态；非键鼠模式跳过——否则会每帧把触控源
+  // 写入的摇杆/按钮状态清零（iPad/CDP 实测：摇杆被打死、按钮幸存，
+  // 因为 poll 只覆盖移动/疾跑/跳/救援，不碰 fire）
   poll() {
     const inp = this.input;
+    if (inp.mode() !== 'kbd') return;
     let ix = 0, iz = 0;
     if (this.keys.has('KeyW')) iz += 1;
     if (this.keys.has('KeyS')) iz -= 1;

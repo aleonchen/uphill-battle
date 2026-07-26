@@ -109,6 +109,13 @@
 - 模式判定（已定论）：`pointerType` last-input-wins，不做设备探测；
   偏好 auto/touch/kbd 存 localStorage('ub-input-mode')，`?touch` 强制。
   Pointer Lock 仅键鼠模式请求；触屏 pixelRatio 降 1.5；静音键挪左侧（避开火键）。
+- iPad 真机踩坑（2026-07-26，别再犯）：
+  - 自动检测必须走**全局常驻 pointer 监听**（Input._bindAutoDetect），不能依赖触控源
+    ——触控源要等 UI 显示才懒创建，检测依赖它就是鸡生蛋死锁。
+  - iPad 触摸后 Safari 会补发**兼容性合成鼠标事件**；键鼠源若参与模式判定会被
+    误判回键鼠。判定只认 pointer/touch 事件的 pointerType。
+  - `touch-action: none` **不继承**！摇杆没单独设置时被浏览器当滚动手势抢走
+    （pointercancel），表现为"摇杆一推就断、按钮正常"。现已全局 `* { touch-action: none }`。
 - 触控布局（和平精英式）：左下摇杆（模拟量，推满疾跑）、右半屏滑屏视角、
   右侧按钮集群（开火按住/瞄/跳/换弹/雷/烟）；快捷栏格子+武器名可点
   （触屏无 1/2/3/4 键的补偿）。
