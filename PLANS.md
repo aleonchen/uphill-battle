@@ -116,6 +116,15 @@
     误判回键鼠。判定只认 pointer/touch 事件的 pointerType。
   - `touch-action: none` **不继承**！摇杆没单独设置时被浏览器当滚动手势抢走
     （pointercancel），表现为"摇杆一推就断、按钮正常"。现已全局 `* { touch-action: none }`。
+  - **`kbSource.poll()` 每帧重建状态会清零触控源写入的值**（移动/跳/救援）——
+    真机症状"摇杆无效、按钮正常"（fire 不在 poll 覆盖范围所以幸存）。
+    修复：poll 在非键鼠模式直接返回。教训：**多输入源时，任何源的 poll 重建
+    都必须带模式守卫**，合成断言（无游戏循环）测不出这类 bug，需要真管线测试。
+- CDP 真机级测试管线（2026-07-26）：`/tmp/cdp-touch-test.mjs`——Node 内置 WebSocket
+  连 Chrome DevTools Protocol，iPad 尺寸模拟 + `Input.dispatchTouchEvent` 注入
+  **原生触摸**（走完整手势管线，非 JS 合成事件），Runtime.evaluate 读
+  `window.__game/__input` 断言。Chrome ≥136 需 `--user-data-dir` 才开调试端口；
+  僵尸实例占 9222 时 `lsof -nP -i :9222 -t | xargs kill -9`。
 - 触控布局（和平精英式）：左下摇杆（模拟量，推满疾跑）、右半屏滑屏视角、
   右侧按钮集群（开火按住/瞄/跳/换弹/雷/烟）；快捷栏格子+武器名可点
   （触屏无 1/2/3/4 键的补偿）。
