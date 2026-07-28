@@ -120,6 +120,10 @@
     真机症状"摇杆无效、按钮正常"（fire 不在 poll 覆盖范围所以幸存）。
     修复：poll 在非键鼠模式直接返回。教训：**多输入源时，任何源的 poll 重建
     都必须带模式守卫**，合成断言（无游戏循环）测不出这类 bug，需要真管线测试。
+  - **iOS pinch 页面缩放**：摇杆+按钮双指同屏被当成捏合，页面放大到角落且回不去。
+    `user-scalable=no` 在 iOS 上防不住捏合（无障碍设计），必须
+    `document.addEventListener('gesturestart', e => e.preventDefault())`
+    （gesture* 是 Safari 私有事件）。
 - CDP 真机级测试管线（2026-07-26）：`/tmp/cdp-touch-test.mjs`——Node 内置 WebSocket
   连 Chrome DevTools Protocol，iPad 尺寸模拟 + `Input.dispatchTouchEvent` 注入
   **原生触摸**（走完整手势管线，非 JS 合成事件），Runtime.evaluate 读
