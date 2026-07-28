@@ -119,6 +119,11 @@ const playerCtl = new PlayerController(game, camera, input, [kbSource], renderer
 game.onTerrainModeChanged = () => playerCtl.resetCamera(); // 画风切换时相机复位
 // 调试钩子：CDP/控制台探测游戏与输入状态（触屏自动化测试用，勿删）
 window.__game = game; window.__input = input;
+// 阻止 iOS Safari 双指捏合页面缩放：摇杆+按钮双指同屏会被当成 pinch（user-scalable=no
+// 在 iOS 上防不住捏合，必须拦截 Safari 私有的 gesture 事件）
+for (const t of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(t, (e) => e.preventDefault());
+}
 
 const touchUI = document.getElementById('touch-ui');
 const muteEl = document.getElementById('mute-icon');
@@ -404,9 +409,13 @@ if (__params.get('test') === 'input') {
     pointerId: 97, pointerType: 'touch', bubbles: true, clientX: 500, clientY: 300,
   }));
   const autoDetect = input.mode() === 'touch';
+  // iOS 捏合缩放拦截已挂上（gesturestart 应被 preventDefault）
+  const ge = new Event('gesturestart', { cancelable: true });
+  document.dispatchEvent(ge);
+  const pinchBlocked = ge.defaultPrevented;
   input.setPref('auto');
   input.lastUsed = 'kbd';
-  console.log('TEST-INPUT ' + JSON.stringify({ kbdMove, evOk, touchMove, joyRelease, lookOk, autoDetect }));
+  console.log('TEST-INPUT ' + JSON.stringify({ kbdMove, evOk, touchMove, joyRelease, lookOk, autoDetect, pinchBlocked }));
 }
 // 调试：?test=balance&rounds=N 玩家也挂 AI（公平 4v4），20Hz 离屏快模 N 回合
 // （跨多场连续模拟，比赛结束自动重开），输出进攻方胜率（样本 ≥40 回合才有统计意义）
