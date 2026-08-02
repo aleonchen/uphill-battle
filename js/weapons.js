@@ -202,7 +202,7 @@ export function fire(game, shooter, origin, dir, spread) {
 
   if (hit && hit.vehicle) {
     game.damageVehicle(hit.vehicle, weapon.damage, shooter);
-    return { target: null, vehicle: hit.vehicle, isHead: false, point: end };
+    return { target: null, vehicle: hit.vehicle, isHead: false, point: end, onCover: false };
   }
 
   if (hit && hit.target) {
@@ -215,9 +215,9 @@ export function fire(game, shooter, origin, dir, spread) {
     }
     if (hit.isHead) dmg *= weapon.headMult;
     game.applyDamage(hit.target, dmg, shooter, hit.isHead);
-    return { target: hit.target, isHead: hit.isHead, point: end };
+    return { target: hit.target, isHead: hit.isHead, point: end, onCover: false };
   }
-  return { target: null, isHead: false, point: end };
+  return { target: null, isHead: false, point: end, onCover: hit ? hit.onCover : false };
 }
 
 // ---------------- 特效池 ----------------

@@ -1,0 +1,19 @@
+# Uphill Battle 联机中继（Cloudflare Workers + Durable Objects）
+# 部署：cd cf-worker && npm install && npx wrangler login（或 CLOUDFLARE_API_TOKEN）&& npx wrangler deploy
+# 本地验证：npx wrangler dev --port 9330 → 客户端 ?ws=ws://localhost:9330/ws/房间号
+name = "uphill-battle-relay"
+main = "src/worker.js"
+compatibility_date = "2026-08-01"
+
+# 路由：aleonchen.work 域（需该 zone 已在你的 CF 账号，DNS 代理开启）
+routes = [
+  { pattern = "aleonchen.work/ws/*", zone_name = "aleonchen.work" },
+]
+
+[[durable_objects.bindings]]
+name = "ROOM_DO"
+class_name = "RoomRelay"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RoomRelay"]

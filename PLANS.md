@@ -2,6 +2,31 @@
 
 攻山模式网页原型的关键决策与踩坑记录。改相关代码前先读对应小节，避免重走弯路。
 
+## 浏览器调试纪律（2026-07-29 硬性约束，违者会搞崩用户主 Chrome）
+
+不变量已上收全局 `~/.kimi-code/AGENTS.md` v3.4 §6「Chrome/浏览器自动化」（隔离实例、
+非默认 user-data-dir、pipe/随机端口、外部资产禁止 attach、禁止批量杀进程），本节只留
+项目落地与事故背景。事故：后台 headless Chrome 占用默认 profile + 批量杀 9222 端口
+进程，把用户正在用的 GUI Chrome SIGKILL，残留 headless 持有 profile singleton 导致
+Dock 激活 SIGABRT。**本项目所有 Chrome 调试一律走 `tools/chrome-test.sh`**
+（shot 截图 / cdp 探针两种模式），它封装了：
+
+1. 任何 Chrome 启动必须带 `--user-data-dir=独立临时目录`（mktemp，退出即删）。
+2. CDP 用 `--remote-debugging-port=0` 随机端口（从 profile 的 DevToolsActivePort 读回）
+   ——用户主 Chrome 持久开了 9222 调试端口，任何固定端口既有误占风险也会并发互撞。
+3. 只杀自己 spawn 的 PID；禁止 `pkill -f chrome`、`lsof -i :<port> | xargs kill` 这类
+   批量清理。
+
+实测补充（2026-08-02）：
+
+- **headless 渲完 WebGL 页经常不自行退出**（截图已落盘，进程挂着；HEAD 旧版同样复现，
+  与代码无关）。shot 模式改为**看门狗**：等 PNG 出现即杀自己 PID，不等 chrome 退。
+- **双客户端 CDP 测试必须开两个独立 WINDOW**（`Target.createTarget newWindow:true` +
+  flatten session）——同窗口双标签时后台标签 rAF 停帧，联机房主模拟直接停摆；
+  `--disable-background-timer-throttling` 等旗标救不了 rAF。
+- 排障抓手：`/tmp/ub-last-shot.log`（shot 模式每次留存的上次 chrome 日志，
+  页面 JS 报错一眼可见——module 导入错误曾让整个 app 白屏而 node --check 查不出）。
+
 ## 瞄准系统：枪管 / 准星 / 弹道一线（2026-07-18 定稿）
 
 用户两次明确要求"枪管、准星、弹道在一条直线上"。最终方案三层分离：
@@ -99,6 +124,53 @@
   地形底图离屏渲染一次（`_mmBg`）；动态画载具/队友/枪声点/玩家箭头
   （yaw→屏幕旋转角 = π − yaw）。`hud.updateOverheads(game, camera)` 签名是 game，别传错。
 
+## 多人联网（里程碑 A，2026-08-02，host-relay）
+
+架构（TODO.md 已锁定）：房主浏览器跑完整 Game 模拟（AI/弹道/回合），加入者发输入、
+收快照、只渲染；中继哑转发。三件套：
+
+- `ws-relay.js`（Node 零依赖，局域网/开发）：RFC6455 手撸，房间管理 + 转发。
+  协议：join→welcome（host 标记+peers）/peer-join/peer-leave（**wasHost**）；
+  其余消息注入 from 广播，带 `to` 则定向。**房主离开不迁移**（加入者收到
+  wasHost 提示"比赛结束"）。
+- `cf-worker/`（Cloudflare Workers + Durable Objects，公网）：同一协议的 DO 版，
+  每房间一个 DO（`wss://<host>/ws/<房间号>`，hibernation attachment 恢复元数据）。
+  本地验证：`cd cf-worker && npm i && npx wrangler dev --port 9330`；
+  部署：`npx wrangler deploy`（需 CF 账号，route aleonchen.work/ws/*）。
+- `js/net.js`：`NetClient` / `RemoteController`（房主侧远端驱动）/ `NetHost`
+  （坑位+20Hz 快照）/ `NetView`（加入者：插值+输入上报+HUD 映射）。
+- 进入方案（已定论）：**私密房号+邀请链接为主，快速匹配（PUB 公共房）为辅**。
+  大厅 UI 在开始界面：创建（随机 4 位房号）/加入/快速匹配/复制邀请链接
+  （`?room=CODE` 点开即进房）；名字 localStorage('ub-name') 记忆。
+  WS 地址自动选：localhost/局域网 IP → ws://host:9325；线上 → wss://host/ws/房号。
+
+关键决策与坑（改联机前先读）：
+
+- **人类替换 bot 坑位**：`addPeer` 红队 bot 优先再蓝队；`isRemote=true` + RemoteController；
+  断线还原为 bot（按当前攻守补 AI）+ toast 提示。
+- **setupRound 不得覆盖远端控制器**：`actor.isPlayer || actor.isRemote ? actor.ai : new AIController`。
+- **快照全部用剩余时间**（heal/reload/bleed/combatRemain），免时钟同步。
+- **输入包事件只消费一次**（连续状态每帧重放，事件置 null）；RemoteController 必须
+  自己做 `finishReload` 收尾（game.update 只给本地玩家和 AI 做）。
+- **角色状态码与比赛状态码是两个表**（actor: alive0/downed1/dead2；match: menu0..4）。
+- **远端载具**：`game._driveInputOf(v)` 按司机取输入（本地玩家 vehicleInput /
+  远端 driveInput）；`game.toggleVehicleFor(actor)` 共享上下车（本地表现由调用方加）。
+  加入者自己开车的引擎声由 NetView 按快照速度回放。
+- **投掷物同步**：`grenades.throwRemote` 仅复现飞行视觉（确定性物理），引信结束
+  只消失不结算；爆炸(boom)/起烟(smokepop) 由房主事件驱动。加入者跑 grenades.update。
+- **远端实体 100ms 插值缓冲**（INTERP_DELAY）：`interpSamples` 两侧快照线性内插
+  （yaw 短弧）；自己仍指数平滑追最新（手感优先）。
+- **本地即时曳光**：开火即按本地相机 castRay 画预测曳光+枪声（rpm pacing），
+  房主确认帧只补命中特效/命中标记（自己弹道去重）。
+- **quickbar/背包/武器名点击统一 input.emit**：单机走事件队列、联网上呈房主。
+- **联机失锁不暂停**：`?room` 下失锁只提示"点击恢复控制"（房主暂停=冻结全房）。
+- **DO join 顺序坑**：host/peers 必须在发 id **之前**算（fetch 时自己已在 clients，
+  顺序反了把自己算进 peers 且谁都不 host）——CF 版曾翻车，ws-relay.js 顺序是对的。
+- 房主离开不迁移（阶段 3 从简）：加入者收到 wasHost → banner"房主已离开，比赛结束"。
+- E2E：`tools/chrome-test.sh cdp tools/net-probe.mjs`（双窗口，7 verdict：坑位/快照/
+  移动/开火/中弹/投掷物/载具）；`UB_WS_RELAY=ws://...` 可打外部中继（miniflare 已验证）；
+  `TEST_WS_URL=ws://... node tools/test-relay.mjs` 打协议层。
+
 ## 输入层（2026-07-19，键盘/触控同构）
 
 - `js/input.js`：`Input`（连续状态 moveX/moveZ/sprint/state{fire,jump,revive} +
@@ -124,11 +196,11 @@
     `user-scalable=no` 在 iOS 上防不住捏合（无障碍设计），必须
     `document.addEventListener('gesturestart', e => e.preventDefault())`
     （gesture* 是 Safari 私有事件）。
-- CDP 真机级测试管线（2026-07-26）：`/tmp/cdp-touch-test.mjs`——Node 内置 WebSocket
+- CDP 真机级测试管线（2026-07-26）：探针脚本（如 /tmp/cdp-*.mjs）——Node 内置 WebSocket
   连 Chrome DevTools Protocol，iPad 尺寸模拟 + `Input.dispatchTouchEvent` 注入
   **原生触摸**（走完整手势管线，非 JS 合成事件），Runtime.evaluate 读
-  `window.__game/__input` 断言。Chrome ≥136 需 `--user-data-dir` 才开调试端口；
-  僵尸实例占 9222 时 `lsof -nP -i :9222 -t | xargs kill -9`。
+  `window.__game/__input` 断言。端口由启动脚本注入 env `UB_CDP_PORT`（随机分配）；
+  **一律经 `tools/chrome-test.sh cdp` 启动**，遵守顶部「浏览器调试纪律」。
 - 触控布局（和平精英式）：左下摇杆（模拟量，推满疾跑）、右半屏滑屏视角、
   右侧按钮集群（开火按住/瞄/跳/换弹/雷/烟/换枪轮换）；快捷栏格子+武器名可点
   （触屏无 1/2/3/4 键的补偿）。
@@ -137,6 +209,16 @@
   （触屏下文字提示同时隐藏——「按 F 上车」对触屏无意义）。换枪按钮 emit('weapon')
   不带 data，player 侧解释为轮换（kbd 的 0/1 直选不受影响）。
 - 测试：`?test=input` 双源断言（键盘移动/事件队列/摇杆模拟量+推满疾跑/松手归零/滑屏视角）。
+- **?nolock 免指针锁定模式**（2026-08-02）：mousemove/mousedown 不再要求
+  pointerLockElement，游戏不因失锁暂停——同机多窗口联机演示专用
+  （**跨窗焦点点击必被 Chrome 以 WrongDocumentError 拒锁**：点后台窗口的那一下
+  先转移焦点，文档此刻"not valid for pointer lock"；指针锁定模型天生排斥多窗口）。
+  联机/双窗 demo URL 一律带 `&nolock`：悬停即视角、点击即开火。
+- **联机失锁不暂停**（2026-08-02）：`?room` 下 pointerlockchange 只提示
+  "点击画面恢复控制"，不设 `game.paused`——房主暂停=冻结全房，加入者暂停无意义。
+  单机保持原语义（ESC→已暂停→点击继续）。
+- CDP 探针注意：`Input.dispatchMouseEvent` 的 movementX/Y 参数被忽略，
+  Chrome 按合成事件的**实际坐标差**计算 movementX——探针要扫一串递增坐标才有视角增量。
 - 注意：平衡模拟只跑 `game.update`，输入层改动**不可能**影响 BALANCE 数值；
   若 BALANCE 波动，先看样本量（≥60 才有意义）。
 

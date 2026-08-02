@@ -51,6 +51,17 @@ export class PlayerController {
     const evs = this.input.drain();
     if (!p) return;
     for (const ev of evs) {
+      // 联网加入者：游戏语义事件上呈房主（房主权威），纯本地表现的事件本地处理
+      if (this.netView) {
+        switch (ev.type) {
+          case 'ads': if (!p.inVehicle) this.ads = !this.ads; break;
+          case 'backpack': this.toggleBackpack(); break;
+          case 'mute': g.hud.setMute(Audio.toggleMuted()); break;
+          case 'terrain': g.toggleTerrainMode(); break;
+          default: this.netView.queueEvent(ev.type, ev.data); // reload/weapon/med/throw/interact
+        }
+        continue;
+      }
       switch (ev.type) {
         case 'reload': g.startReload(p); break;
         case 'weapon': g.switchWeapon(p, ev.data == null ? (p.weaponIndex === 0 ? 1 : 0) : ev.data); break;
@@ -79,37 +90,14 @@ export class PlayerController {
     if (!open) this.dom.requestPointerLock();
   }
 
-  // F 键上/下载具：上车吸附到座位并隐藏角色（命中框随车移动），下车放到车右侧
+  // F 键上/下载具：核心逻辑在 game.toggleVehicleFor（远端玩家共用），此处加本地表现
   toggleVehicle() {
     const g = this.game, p = g.player;
-    if (!p || p.state !== 'alive' || g.matchState !== 'combat') return;
-    if (p.inVehicle) {
-      const v = p.inVehicle;
-      v.driver = null;
-      p.inVehicle = null;
-      const rx = -Math.cos(v.yaw), rz = Math.sin(v.yaw); // 车右方向
-      p.pos.set(v.pos.x + rx * 2.6, 0, v.pos.z + rz * 2.6);
-      p.pos.y = heightAt(p.pos.x, p.pos.z);
-      p.char.group.visible = true;
-      this.resetCamera();
-      Audio.engineStop();
-      return;
-    }
-    let best = null, bd = 16; // 4m 内最近空车（残骸不可上）
-    for (const v of g.vehicles) {
-      if (v.driver || v.wrecked) continue;
-      const d = v.pos.distanceToSquared(p.pos);
-      if (d < bd) { bd = d; best = v; }
-    }
-    if (best) {
-      best.driver = p;
-      p.inVehicle = best;
+    const r = g.toggleVehicleFor(p);
+    if (r === 'exit') { this.resetCamera(); Audio.engineStop(); }
+    else if (r === 'enter') {
       this.input.state.fire = false;
       this.ads = false;
-      // 上车直接切到司机视角：面朝车头方向平视（之后鼠标仍可自由环顾）
-      p.yaw = best.yaw;
-      p.pitch = 0;
-      p.char.group.visible = false;
       this.resetCamera();
       Audio.engineStart();
     }
@@ -142,6 +130,15 @@ export class PlayerController {
     const sens = this.ads ? 0.0012 : 0.0022;
     p.yaw -= look.dx * sens;
     p.pitch = clamp(p.pitch - look.dy * sens, -1.2, 1.2);
+
+    // 联网加入者：移动/开火/跳/救援全由房主权威模拟（快照回放），本地只管视角与相机
+    if (this.netView) {
+      p.mesh.rotation.y = p.yaw;
+      this.updateCamera(dt);
+      this.updateGunConvergence();
+      this._updateInteractTip(); // 上下车提示（载具状态来自快照）
+      return;
+    }
 
     if (p.inVehicle) {
       this.updateDriving(dt);

@@ -1,0 +1,13 @@
+{
+  "name": "uphill-battle-relay",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Uphill Battle 联机中继（Cloudflare Workers + Durable Objects）",
+  "scripts": {
+    "dev": "wrangler dev --port 9330",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

@@ -13,6 +13,8 @@ import { Grenades } from './grenades.js';
 import { clamp, rand } from './utils.js';
 
 const GRAVITY = 22;
+const _muzzle = new THREE.Vector3(); // tryFire 联网事件取枪口位（模块级复用，免分配）
+const r2 = (v) => Math.round(v * 100) / 100;
 const JUMP_VEL = 8.5;          // 跳跃高度 ~1.64m（能上 1 格 1.5m 台阶 + 余量）
 const STEP_RATE = 12;          // MC 模式上下台阶的垂直过渡速率
 const MAX_SLOPE = 1.5;         // 经典模式坡度限制（约56°，山顶环形区可走）
@@ -53,8 +55,9 @@ export class Game {
       new Vehicle(scene, ATTACK_SPAWNS.back.x + 8, ATTACK_SPAWNS.back.z - 6),
       new Vehicle(scene, ATTACK_SPAWNS.front.x + 8, ATTACK_SPAWNS.front.z - 6),
     ];
-    this.vehicleInput = { fwd: 0, steer: 0 }; // 玩家驾驶输入（player.js 每帧写入）
+    this.vehicleInput = { fwd: 0, steer: 0 }; // 本地玩家驾驶输入（player.js 每帧写入）
     this.grenades = new Grenades(scene, this);
+    this.netHook = null;      // 联网房主事件出口（net.js NetHost 注入；null=单机）
   }
 
   createActors() {
@@ -134,7 +137,7 @@ export class Game {
         actor.pos.y = heightAt(actor.pos.x, actor.pos.z);
         actor.yaw = Math.atan2(-actor.pos.x, -actor.pos.z); // 面朝山
         actor.pitch = 0;
-        actor.ai = actor.isPlayer ? null : new AIController(this, actor, {
+        actor.ai = actor.isPlayer || actor.isRemote ? actor.ai : new AIController(this, actor, {
           role: 'attack', route: ROUTES[routeKey],
         });
       } else {
@@ -144,7 +147,7 @@ export class Game {
         actor.pos.copy(post.pos);
         actor.yaw = post.yaw;
         actor.pitch = 0;
-        actor.ai = actor.isPlayer ? null : new AIController(this, actor, { role: 'defense', post });
+        actor.ai = actor.isPlayer || actor.isRemote ? actor.ai : new AIController(this, actor, { role: 'defense', post });
       }
     }
 
@@ -191,9 +194,10 @@ export class Game {
   update(dt) {
     this.now += dt;
     this.effects.update(dt);
-    // 载具：有驾驶员时用其输入，否则惯性滑行；驾驶员吸附到座位
+    // 载具：按司机取输入（本地玩家 → vehicleInput；远端玩家 → 其 RemoteController.driveInput），
+    // 无人或 AI（不会开车）则惯性滑行；驾驶员吸附到座位
     for (const v of this.vehicles) {
-      v.update(dt, v.driver ? this.vehicleInput : null);
+      v.update(dt, this._driveInputOf(v));
       if (v.driver) v.seatPos(v.driver.pos);
     }
     this.grenades.update(dt);
@@ -270,6 +274,44 @@ export class Game {
 
   countAlive(team) {
     return this.actors.filter((a) => a.team === team && a.state === 'alive').length;
+  }
+
+  // 某辆车的驾驶输入来源：本地玩家 / 远端玩家（RemoteController.driveInput）/ null（滑行）
+  _driveInputOf(v) {
+    const d = v.driver;
+    if (!d) return null;
+    if (d === this.player) return this.vehicleInput;
+    if (d.ai && d.ai.driveInput) return d.ai.driveInput;
+    return null;
+  }
+
+  // 上/下载具（任意 actor 共用：本地玩家经 player.toggleVehicle，远端经 RemoteController）
+  // 返回 'enter'|'exit'|null；相机/音效等本地表现由调用方自理
+  toggleVehicleFor(actor) {
+    if (!actor || actor.state !== 'alive' || this.matchState !== 'combat') return null;
+    if (actor.inVehicle) {
+      const v = actor.inVehicle;
+      v.driver = null;
+      actor.inVehicle = null;
+      const rx = -Math.cos(v.yaw), rz = Math.sin(v.yaw); // 车右方向
+      actor.pos.set(v.pos.x + rx * 2.6, 0, v.pos.z + rz * 2.6);
+      actor.pos.y = heightAt(actor.pos.x, actor.pos.z);
+      actor.char.group.visible = true;
+      return 'exit';
+    }
+    let best = null, bd = 16; // 4m 内最近空车（残骸不可上）
+    for (const v of this.vehicles) {
+      if (v.driver || v.wrecked) continue;
+      const d = v.pos.distanceToSquared(actor.pos);
+      if (d < bd) { bd = d; best = v; }
+    }
+    if (!best) return null;
+    best.driver = actor;
+    actor.inVehicle = best;
+    actor.yaw = best.yaw; // 上车面朝车头
+    actor.pitch = 0;
+    actor.char.group.visible = false;
+    return 'enter';
   }
 
   getSpectateTarget() {
@@ -393,6 +435,18 @@ export class Game {
     actor.nextShot = this.now + 60 / w.rpm;
     mag.mag--;
     const hit = fire(this, actor, origin, dir, spread);
+    // 联网：房主把开火事件广播给加入者（曳光/命中特效/播报在对方端复现）
+    if (this.netHook) {
+      const mz = actor.char.muzzle.getWorldPosition(_muzzle);
+      const end = hit.point;
+      this.netHook({
+        k: 'shot', id: actor.id, w: actor.weaponIndex,
+        o: [r2(mz.x), r2(mz.y), r2(mz.z)],
+        e: [r2(end.x), r2(end.y), r2(end.z)],
+        h: hit.target ? 1 : hit.vehicle ? 2 : hit.onCover ? 3 : 4,
+        v: hit.target ? hit.target.id : -1, hd: hit.isHead ? 1 : 0,
+      });
+    }
     // 枪口闪光（池化面片，短暂可见）+ 持枪前举姿态
     actor.char.flash.visible = true;
     actor.char.flash.rotation.z = Math.random() * Math.PI;
@@ -559,6 +613,7 @@ export class Game {
     target.moving = false;
     setDownedPose(target.char);
     if (attacker) attacker.kills++;
+    if (this.netHook) this.netHook({ k: 'feed', m: 'down', a: attacker ? attacker.id : -1, t: target.id });
     this.hud.killfeed(attacker, target, '击倒');
     if (attacker && attacker.isPlayer) this.hud.eventBanner(`你 击倒了 ${target.name}`);
     else if (target.isPlayer) this.hud.eventBanner(attacker ? `你被 ${attacker.name} 击倒` : '你倒下了', '#ff5b4d');
@@ -573,6 +628,7 @@ export class Game {
     target.hp = 0;
     target.deadAt = this.now;
     setDeadPose(target.char);
+    if (this.netHook) this.netHook({ k: 'feed', m: 'kill', a: attacker ? attacker.id : -1, t: target.id });
     if (attacker) this.hud.killfeed(attacker, target, '淘汰');
     if (attacker && attacker.isPlayer) this.hud.eventBanner(`你 淘汰了 ${target.name}`);
     else if (target.isPlayer) this.hud.eventBanner(attacker ? `你被 ${attacker.name} 淘汰` : '你被淘汰了', '#ff5b4d');
@@ -608,6 +664,7 @@ export class Game {
     target.reviveProgress = 0;
     target.bleedUntil = 0;
     resetPose(target.char);
+    if (this.netHook) this.netHook({ k: 'feed', m: 'revive', a: -1, t: target.id });
     this.hud.killfeed(null, target, '被救起');
     if (target.team === 'red') Audio.play('revive'); // 上行琶音
     if (target.isPlayer) this.hud.onPlayerRevived();

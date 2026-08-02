@@ -8,6 +8,7 @@ import { Input, KeyboardMouseSource, TouchSource } from './input.js';
 import { activeColliders, heightAt, ROUTES, DEFENSE_POINTS } from './terrain.js';
 import { castRay } from './weapons.js';
 import { AIController, losClear } from './ai.js';
+import { NetClient, NetHost, NetView } from './net.js';
 import { clamp } from './utils.js';
 
 const __params = new URLSearchParams(location.search);
@@ -113,7 +114,7 @@ const hud = new HUD();
 const game = new Game(scene, hud);
 // 通用输入层：键盘源常驻；触控源随模式切换懒创建（?touch 或 last-input-wins 触发）
 const input = new Input(__params);
-const kbSource = new KeyboardMouseSource(input, renderer.domElement);
+const kbSource = new KeyboardMouseSource(input, renderer.domElement, { noLock: __params.has('nolock') });
 let touchSource = null;
 const playerCtl = new PlayerController(game, camera, input, [kbSource], renderer.domElement);
 game.onTerrainModeChanged = () => playerCtl.resetCamera(); // 画风切换时相机复位
@@ -149,14 +150,15 @@ for (const b of document.querySelectorAll('#mode-sel button')) {
     for (const x of document.querySelectorAll('#mode-sel button')) x.classList.toggle('on', x === b);
   });
 }
-// 快捷栏可点（触屏吃药/丢雷；键鼠解锁时也能点）
+// 快捷栏可点（触屏吃药/丢雷；键鼠解锁时也能点）——统一走输入事件队列，
+// 单机由 player._handleEvents 消费，联网加入者由它上呈房主（同一条路径）
 for (const s of document.querySelectorAll('#quickbar .slot')) {
   s.style.pointerEvents = 'auto';
   s.addEventListener('pointerup', (e) => {
     e.stopPropagation();
     const k = s.dataset.k;
-    if (k === 'aid' || k === 'med') game.useMed(game.player, k);
-    else playerCtl.throwNade(k);
+    if (k === 'aid' || k === 'med') input.emit('med', k);
+    else input.emit('throw', k);
   });
 }
 // 武器名可点：切换武器（触屏无 1/2 键）
@@ -164,28 +166,113 @@ const wname = document.getElementById('weapon-name');
 wname.style.pointerEvents = 'auto';
 wname.addEventListener('pointerup', (e) => {
   e.stopPropagation();
-  game.switchWeapon(game.player, game.player.weaponIndex === 0 ? 1 : 0);
+  input.emit('weapon');
 });
-// 背包面板点击用药：成功则关面板并恢复指针锁定
+// 背包面板点击用药：用药事件上呈后关面板并恢复指针锁定
 hud._onUseMed = (t) => {
-  if (game.useMed(game.player, t)) {
-    hud.toggleBackpack(game, false);
-    if (!input.isTouch()) renderer.domElement.requestPointerLock();
-  }
+  input.emit('med', t);
+  hud.toggleBackpack(game, false);
+  if (!input.isTouch()) renderer.domElement.requestPointerLock();
 };
+
+// ---------------- 联机大厅：创建/加入/快速匹配；?room=xxx 直达（邀请链接） ----------------
+let netClient = null, netHost = null, netView = null;
+const startBtn = document.getElementById('start-btn');
+const lobbyStatus = document.getElementById('lobby-status');
+const setLobby = (t) => { lobbyStatus.textContent = t; };
+
+// WS 地址：?ws= 优先；本地/局域网连开发中继（9325）；线上走 CF 同域 /ws/<房间号>
+function defaultWsUrl(room) {
+  const h = location.hostname;
+  const local = /^(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
+  if (local) return `ws://${h}:9325`;
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/${room}`;
+}
+
+function joinRoom(room, name) {
+  if (netClient) return;
+  room = String(room || '').trim().toUpperCase();
+  if (!room) { setLobby('请输入房间号'); return; }
+  setLobby('连接中…');
+  netClient = new NetClient(__params.get('ws') || defaultWsUrl(room), room, name);
+  netClient.onReady = (isHost, peers) => {
+    if (isHost) {
+      netHost = new NetHost(game, netClient);
+      window.__netHost = netHost; // 自动化探针断言用
+      setLobby(`房间 ${room} 已创建（你是房主）· 点开始比赛，朋友可随时加入`);
+      startBtn.textContent = '开始比赛';
+      document.getElementById('invite-row').classList.remove('hidden');
+      hud.toast(`房间 ${room}：你是房主，开赛后朋友即可加入`);
+    } else {
+      netView = new NetView(game, netClient, hud, playerCtl, peers[0] && peers[0].name);
+      playerCtl.netView = netView;
+      window.__netView = netView; // 自动化探针断言用
+      setLobby(`已加入 ${room}（房里 ${peers.length + 1} 人）· 等房主开赛`);
+      startBtn.textContent = '等房主开赛…';
+      startBtn.disabled = true;
+      hud.toast(`房间 ${room}：已加入，等房主开赛`);
+    }
+    // ?autostart 与联机叠加时等角色判定：仅房主开赛，加入者由快照驱动
+    if (__params.has('autostart') && isHost) game.startMatch();
+    for (const b of document.querySelectorAll('#lobby button')) {
+      if (b.id !== 'copy-invite') b.disabled = true;
+    }
+  };
+  netClient.onError = () => {
+    setLobby('联机中继连不上（本地试玩先跑 node ws-relay.js）');
+    netClient = null;
+  };
+}
+
+// 大厅 UI：名字记忆 + 创建（随机 4 位房号）/ 加入 / 快速匹配 / 复制邀请链接
+const nameIn = document.getElementById('name-in');
+nameIn.value = localStorage.getItem('ub-name') || `玩家${Math.floor(Math.random() * 900 + 100)}`;
+const myName = () => {
+  const n = nameIn.value.trim() || '无名';
+  localStorage.setItem('ub-name', n);
+  return n;
+};
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去易混淆 I/O/0/1
+document.getElementById('create-room-btn').addEventListener('click', () => {
+  const code = Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+  joinRoom(code, myName());
+});
+document.getElementById('join-room-btn').addEventListener('click', () => {
+  joinRoom(document.getElementById('room-in').value, myName());
+});
+document.getElementById('quick-btn').addEventListener('click', () => joinRoom('PUB', myName()));
+document.getElementById('copy-invite').addEventListener('click', async (e) => {
+  const url = `${location.origin}${location.pathname}?room=${netClient.room}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    setLobby(`邀请链接已复制：${url}`);
+  } catch {
+    setLobby(url); // 剪贴板不可用（非安全上下文）直接显示
+  }
+});
+
+// ?room=xxx 直达（邀请链接点开即进房）
+const __room = __params.get('room');
+if (__room) joinRoom(__room, __params.get('name') || undefined);
 
 // 开始 / 重开（Pointer Lock 仅键鼠模式请求）
 document.getElementById('start-btn').addEventListener('click', () => {
   Audio.init(); // 用户手势内创建 AudioContext
+  // 联网加入者：不开本地比赛，等房主快照驱动（首个快照会自动收起开始界面）
+  if (netClient && !netHost) {
+    if (!input.isTouch() && !__params.has('nolock')) renderer.domElement.requestPointerLock();
+    return;
+  }
   game.startMatch();
-  if (!input.isTouch()) renderer.domElement.requestPointerLock();
+  if (!input.isTouch() && !__params.has('nolock')) renderer.domElement.requestPointerLock();
 });
 document.getElementById('restart-btn').addEventListener('click', () => {
   location.reload();
 });
 
-// 调试：?autostart 直接开赛（无指针锁定，供无头截图/自动化测试）
-if (__params.has('autostart')) {
+// 调试：?autostart 直接开赛（无指针锁定，供无头截图/自动化测试）；
+// 联机模式下由 onReady 按角色决定是否开赛（见上方联网块）
+if (__params.has('autostart') && !__room) {
   game.startMatch();
 }
 // 调试：?fire 开赛后自动开火（验证持枪/开火姿态）
@@ -323,10 +410,10 @@ if (__params.get('test') === 'ram') {
   game.damageVehicle(v, 9999, p);
   const wrecked = v.wrecked;
   const blastHurt = en.hp < 100;
-  // 3) 撞人：另一辆车高速撞上前方敌人
+  // 3) 撞人：另一辆车高速撞上前方敌人（放 2.5m：单帧 15 速仅行 0.75m，4m 够不到判定半径 2.2m）
   const v2 = game.vehicles[1];
   en.hp = 100; en.state = 'alive';
-  en.pos.set(v2.pos.x + Math.sin(v2.yaw) * 4, 0, v2.pos.z + Math.cos(v2.yaw) * 4);
+  en.pos.set(v2.pos.x + Math.sin(v2.yaw) * 2.5, 0, v2.pos.z + Math.cos(v2.yaw) * 2.5);
   en.pos.y = heightAt(en.pos.x, en.pos.z);
   v2.speed = 15;
   game.update(1 / 20); // 车前行一步，应撞上
@@ -461,18 +548,33 @@ if (__params.get('test') === 'balance') {
   }));
 }
 
-// Pointer Lock 丢失 → 暂停并提示
+// Pointer Lock 丢失 → 暂停并提示（?nolock 模式不锁也不暂停：多窗口演示用）
+// 联机模式（?room）：失锁**不暂停**——房主暂停会冻结全房，加入者暂停也无意义
+// （世界在房主端继续跑）；只把提示换成"点击恢复鼠标控制"。
+const NOLOCK = __params.has('nolock');
 const pauseTip = document.getElementById('pause-tip');
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === renderer.domElement;
   if (locked) Audio.resume(); // 重新获取锁定时恢复音频
+  if (NOLOCK) { game.paused = false; pauseTip.classList.add('hidden'); return; }
   const running = ['prep', 'combat', 'roundEnd'].includes(game.matchState);
-  game.paused = running && !locked;
+  const unlocked = running && !locked;
+  game.paused = unlocked && !netClient;
+  pauseTip.querySelector('p').textContent = netClient
+    ? '鼠标已释放 · 点击画面恢复控制'
+    : '已暂停 · 点击画面继续';
   // 背包打开时也失去指针锁定，但显示背包而非暂停提示
-  pauseTip.classList.toggle('hidden', !game.paused || hud.backpackOpen);
+  pauseTip.classList.toggle('hidden', !unlocked || hud.backpackOpen);
 });
 pauseTip.addEventListener('click', () => {
   renderer.domElement.requestPointerLock();
+});
+// autostart/联机进场等无开始按钮路径：键鼠模式下点击画布即补请求指针锁定
+renderer.domElement.addEventListener('mousedown', () => {
+  if (NOLOCK || input.isTouch() || document.pointerLockElement === renderer.domElement) return;
+  if (['prep', 'combat', 'roundEnd'].includes(game.matchState)) {
+    renderer.domElement.requestPointerLock();
+  }
 });
 
 window.addEventListener('resize', () => {
@@ -487,8 +589,15 @@ function loop() {
   requestAnimationFrame(loop);
   const dt = Math.min(clock.getDelta(), 0.05);
   if (!game.paused) {
-    game.update(dt);
-    playerCtl.update(dt);
+    if (netView) {
+      // 联网加入者：不跑本地模拟，快照驱动 + 输入上报（playerCtl 走联网分支：只视角/相机）
+      netView.update(dt);
+      playerCtl.update(dt);
+    } else {
+      game.update(dt);
+      playerCtl.update(dt);
+      if (netHost) netHost.update(dt); // 房主：模拟后广播快照（带上本帧事件）
+    }
     updateSnow(dt, camera.position);
     // 阴影相机跟随玩家
     const f = game.player ? game.player.pos : camera.position;

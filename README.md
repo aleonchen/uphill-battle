@@ -7,12 +7,13 @@
 > Built with [Kimi K3](https://www.moonshot.cn/) & Kimi Code —— 本游戏由 Kimi K3 模型
 > 与 Kimi Code CLI 结对开发：玩法设计、编码、测试验证、平衡调优全流程参与。
 
-模仿《和平精英》攻山模式的单机网页 3D 射击游戏：4v4（你 + 3 个 AI 队友 vs 4 个 AI 敌人），
-五局三胜，每回合攻守互换，争夺中央雪山山顶。Minecraft 像素风：
-程序化方块阶梯地形 + canvas 像素贴图 + MC 比例关节角色（另有经典平滑画风，V 键切换）。
+模仿《和平精英》攻山模式的网页 3D 射击游戏：4v4 五局三胜，每回合攻守互换，争夺中央雪山山顶。
+**支持单机（你 + 3 个 AI 队友 vs 4 个 AI 敌人）与联机（真人替换 bot 坑位，房主权威 host-relay）**。
+Minecraft 像素风：程序化方块阶梯地形 + canvas 像素贴图 + MC 比例关节角色（另有经典平滑画风，V 键切换）。
 
-特色：沙滩车驾驶、手雷/烟雾弹、急救箱/全能医疗箱、真实掩体（石/树挡子弹、岩石挡 AI 视线）、
-扇区防守 AI（绕后偷袭真的有效）、枪声方位雷达 + 圆形小地图、倒计时圈、双画风。
+特色：联机对战（私密房号 + 邀请链接 / 快速匹配）、沙滩车驾驶、手雷/烟雾弹、急救箱/全能医疗箱、
+真实掩体（石/树挡子弹、岩石挡 AI 视线）、扇区防守 AI（绕后偷袭真的有效）、枪声方位雷达 + 圆形小地图、
+倒计时圈、双画风。
 
 纯静态站点，Three.js 已本地化（`lib/three.module.js`，r160），离线可玩，无需构建。
 支持 PWA：iPad/iPhone Safari 打开后「分享 → 添加到主屏幕」，图标全屏启动，体验等同 App。
@@ -24,6 +25,23 @@ cd 本目录
 python3 serve.py
 # 浏览器打开 http://localhost:8123
 ```
+
+## 联机对战
+
+开始界面选「创建房间 / 加入 / 快速匹配」，把邀请链接发给朋友即可（`?room=房号` 点开即进房）。
+真人替换 bot 坑位：2 人即可开局（2 人 + 2 bot vs 4 bot）。房主浏览器跑模拟（房主权威），
+房主离开比赛结束。
+
+- **局域网**：再跑一个 `node ws-relay.js`（零依赖 Node），朋友连 `http://你的局域网IP:8123`。
+- **公网**：联机中继部署在 Cloudflare Workers + Durable Objects（`cf-worker/`）：
+
+```bash
+cd cf-worker && npm install
+npx wrangler login        # 或 CLOUDFLARE_API_TOKEN
+npx wrangler deploy       # 路由 aleonchen.work/ws/*
+```
+
+本地验证 CF 版：`npx wrangler dev --port 9330`（miniflare），客户端 `?ws=ws://localhost:9330/ws/房号`。
 
 ## 操作
 

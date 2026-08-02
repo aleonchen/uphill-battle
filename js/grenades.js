@@ -57,15 +57,37 @@ export class Grenades {
     const mesh = this.pool[type].find((m) => !m.visible);
     if (!mesh) return false;
     mesh.visible = true;
+    const vel = dir.clone().multiplyScalar(THROW_SPEED).add(new THREE.Vector3(0, 3.5, 0));
     this.live.push({
       type, owner, mesh,
       pos: origin.clone(),
-      vel: dir.clone().multiplyScalar(THROW_SPEED).add(new THREE.Vector3(0, 3.5, 0)),
+      vel,
       fuse: type === 'frag' ? FRAG_FUSE : SMOKE_DELAY,
       settled: false,
     });
     Audio.play('throw');
+    // 联网：加入者复现飞行轨迹（爆炸/起烟由房主事件驱动，见下方 hook）
+    if (this.game.netHook) {
+      const r = (x) => Math.round(x * 100) / 100;
+      this.game.netHook({ k: 'nade', ty: type, o: [r(origin.x), r(origin.y), r(origin.z)], v: [r(vel.x), r(vel.y), r(vel.z)] });
+    }
     return true;
+  }
+
+  // 远端投射物（加入者专用）：仅复现飞行视觉，引信结束只消失，效果由房主事件来
+  throwRemote(type, origin, vel) {
+    const mesh = this.pool[type].find((m) => !m.visible);
+    if (!mesh) return;
+    mesh.visible = true;
+    this.live.push({
+      type, owner: null, mesh,
+      pos: origin.clone(),
+      vel: vel.clone(),
+      fuse: type === 'frag' ? FRAG_FUSE : SMOKE_DELAY,
+      settled: false,
+      remote: true,
+    });
+    Audio.play('throw');
   }
 
   update(dt) {
@@ -96,6 +118,7 @@ export class Grenades {
       if (n.fuse <= 0) {
         n.mesh.visible = false;
         this.live.splice(i, 1);
+        if (n.remote) continue; // 远端投射物：爆炸/起烟由房主事件复现
         if (n.type === 'frag') this.explodeAt(n.pos, n.owner);
         else this.popSmoke(n.pos);
       }
@@ -124,6 +147,7 @@ export class Grenades {
     const g = this.game;
     g.effects.boom(pos);
     Audio.play('boom', { dist: pos.distanceTo(g.player.pos) });
+    if (g.netHook) g.netHook({ k: 'boom', p: [Math.round(pos.x * 100) / 100, Math.round(pos.y * 100) / 100, Math.round(pos.z * 100) / 100] });
     const _dir = new THREE.Vector3();
     for (const a of g.actors) {
       if (a.state === 'dead') continue;
@@ -151,5 +175,6 @@ export class Grenades {
       this.clouds.push(c);
     }
     Audio.play('smoke_pop', { dist: pos.distanceTo(g.player.pos) });
+    if (g.netHook) g.netHook({ k: 'smokepop', p: [Math.round(pos.x * 100) / 100, Math.round(pos.y * 100) / 100, Math.round(pos.z * 100) / 100] });
   }
 }

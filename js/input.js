@@ -70,9 +70,10 @@ export class Input {
 
 // ================= 键鼠源 =================
 export class KeyboardMouseSource {
-  constructor(input, dom) {
+  constructor(input, dom, opts = {}) {
     this.input = input;
     this.dom = dom;
+    this.noLock = !!opts.noLock; // ?nolock：免指针锁定（同机多窗口演示/调试）
     this.keys = new Set();
     this._bind();
   }
@@ -100,12 +101,12 @@ export class KeyboardMouseSource {
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     document.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement !== dom) return;
+      if (!this.noLock && document.pointerLockElement !== dom) return;
       inp.lookDX += e.movementX;
       inp.lookDY += e.movementY;
     });
     dom.addEventListener('mousedown', (e) => {
-      if (document.pointerLockElement !== dom) return;
+      if (!this.noLock && document.pointerLockElement !== dom) return;
       if (e.button === 0) inp.state.fire = true;
       if (e.button === 2) inp.emit('ads');
     });

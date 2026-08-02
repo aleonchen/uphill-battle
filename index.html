@@ -158,6 +158,22 @@
     padding: 5px 16px; border-radius: 6px; }
   #mode-sel button.on { background: rgba(255,215,106,.25); border-color: #ffd76a; }
 
+  /* 联机大厅 */
+  #lobby { margin-top: 18px; pointer-events: auto; }
+  #lobby .lb-sep { font-size: 13px; opacity: .65; margin-bottom: 10px; }
+  #lobby .lb-row { display: flex; gap: 8px; justify-content: center; margin-bottom: 8px; }
+  #lobby input { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.3);
+    border-radius: 6px; color: #fff; font-size: 14px; padding: 7px 10px; text-align: center; }
+  #lobby input::placeholder { color: rgba(255,255,255,.45); }
+  #name-in { width: 140px; }
+  #room-in { width: 80px; text-transform: uppercase; }
+  #lobby button { cursor: pointer; font-size: 14px; color: #fff;
+    background: rgba(80,140,220,.4); border: 1px solid rgba(120,170,240,.5);
+    border-radius: 6px; padding: 7px 14px; }
+  #lobby button:disabled { opacity: .4; cursor: default; }
+  #lobby-status { font-size: 13px; min-height: 18px; opacity: .9; }
+  #copy-invite { background: rgba(60,160,90,.4) !important; border-color: rgba(100,200,130,.5) !important; }
+
   /* 全屏覆盖层 */
   .overlay { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column;
     align-items: center; justify-content: center; color: #fff; text-align: center;
@@ -300,7 +316,23 @@
       <button data-m="touch">触屏</button>
       <button data-m="kbd">键鼠</button>
     </div>
-    <button id="start-btn">点击开始</button>
+    <button id="start-btn">单机开始</button>
+    <div id="lobby">
+      <div class="lb-sep">— 联机对战（4v4，人类替换 bot 坑位）—</div>
+      <div class="lb-row">
+        <input id="name-in" placeholder="你的名字" maxlength="8" autocomplete="off">
+      </div>
+      <div class="lb-row">
+        <button id="create-room-btn">创建房间</button>
+        <input id="room-in" placeholder="房间号" maxlength="6" autocomplete="off">
+        <button id="join-room-btn">加入</button>
+        <button id="quick-btn">快速匹配</button>
+      </div>
+      <div id="lobby-status"></div>
+      <div class="lb-row hidden" id="invite-row">
+        <button id="copy-invite">复制邀请链接</button>
+      </div>
+    </div>
     <div class="credit">Built with Kimi K3 &amp; Kimi Code</div>
   </div>
 
