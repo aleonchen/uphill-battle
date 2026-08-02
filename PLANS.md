@@ -171,6 +171,30 @@ Dock 激活 SIGABRT。**本项目所有 Chrome 调试一律走 `tools/chrome-tes
   移动/开火/中弹/投掷物/载具）；`UB_WS_RELAY=ws://...` 可打外部中继（miniflare 已验证）；
   `TEST_WS_URL=ws://... node tools/test-relay.mjs` 打协议层。
 
+### Cloudflare 部署 SOP（联机中继公网上线）
+
+前提：
+
+- 域名 `aleonchen.work` 的 zone 已托管在 Cloudflare，且 DNS 记录为**代理开启（橙云）**
+  ——Workers 路由只在流量过 CF 代理时生效。当前 Pages 用 CNAME → GitHub 没问题，
+  `/ws/*` 会被 Worker 截胡，其余路径照常落 Pages。
+- 本地已 `npm install`（`cf-worker/`，wrangler 在 devDependencies）。
+
+步骤：
+
+```bash
+cd cf-worker
+npx wrangler login        # 浏览器授权；CI/无头用 CLOUDFLARE_API_TOKEN（需 Workers 编辑权限）
+npx wrangler deploy       # 部署 worker + 绑定 DO + 配置 route（wrangler.toml 已含）
+```
+
+- 验证：`curl https://aleonchen.work/ws/test` 应回 426「房间中继」；
+  再跑 `TEST_WS_URL=wss://aleonchen.work/ws/cftest node tools/test-relay.mjs`（7 断言）。
+- wrangler.toml 关键配置：`routes = [{pattern="aleonchen.work/ws/*", zone_name=...}]`、
+  DO 绑定 `ROOM_DO`、migration `new_classes=["RoomRelay"]`（改类名要加新 migration）。
+- 成本：DO 有 hibernation，空闲房间不烧请求时长；免费额度足够朋友局量级。
+- 排障：`npx wrangler tail` 看实时日志；DO 状态在 CF 仪表盘 → Workers → uphill-battle-relay。
+
 ## 输入层（2026-07-19，键盘/触控同构）
 
 - `js/input.js`：`Input`（连续状态 moveX/moveZ/sprint/state{fire,jump,revive} +

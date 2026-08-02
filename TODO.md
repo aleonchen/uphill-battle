@@ -26,7 +26,8 @@
   - 大厅 UI：创建/加入/快速匹配/复制邀请链接（`?room=CODE` 直达）
   - 进入方案定论：私密房号+邀请链接为主，PUB 公共房快速匹配为辅
   - 验证：miniflare 协议 7 断言 + 全栈 E2E 7 verdict 全过
-  - **待用户执行**：`cd cf-worker && npx wrangler login && npx wrangler deploy`（需 CF 账号）
+  - **待用户执行**：`cd cf-worker && npx wrangler login && npx wrangler deploy`
+    （需 CF 账号；完整 SOP 含 DNS 前提/验证/排障见 PLANS.md「Cloudflare 部署 SOP」）
 - [ ] **真人对局验收**（用户 WiFi/朋友局）：手感、平衡、房主离开体验
 
 后置（按需，先不做）：客户端预测（自己移动零延迟感）、服务器权威防作弊
