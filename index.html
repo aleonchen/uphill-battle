@@ -147,6 +147,8 @@
   .tb[data-act=reload] { right: 146px; bottom: 176px; }
   .tb[data-act=frag] { right: 232px; bottom: 152px; }
   .tb[data-act=smoke] { right: 232px; bottom: 234px; }
+  .tb[data-act=weapon] { right: 44px; bottom: 300px; }
+  .tb[data-act=interact] { right: 146px; bottom: 254px; background: rgba(46,110,180,.72); }
 
   /* 开始界面操作模式选择 */
   #mode-sel { font-size: 13px; opacity: .9; margin-bottom: 24px; display: flex; gap: 8px;
@@ -280,6 +282,8 @@
     <button class="tb" data-act="reload">换弹</button>
     <button class="tb" data-act="frag">雷</button>
     <button class="tb" data-act="smoke">烟</button>
+    <button class="tb" data-act="weapon">换枪</button>
+    <button class="tb hidden" data-act="interact" id="tb-interact">上车</button>
   </div>
 
   <!-- 开始界面 -->

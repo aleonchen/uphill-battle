@@ -24,7 +24,7 @@ export class HUD {
       channel: $('channel'), channelArc: $('channel-arc'),
       channelNum: $('channel-num'), channelLabel: $('channel-label'),
       spectate: $('spectate'),
-      interactTip: $('interact-tip'),
+      interactTip: $('interact-tip'), interactBtn: $('tb-interact'),
       startScreen: $('start-screen'), endScreen: $('end-screen'),
       endTitle: $('end-title'), endScore: $('end-score'), endStats: $('end-stats'),
       muteIcon: $('mute-icon'),
@@ -201,6 +201,15 @@ export class HUD {
     this._interactCache = text;
     this.el.interactTip.textContent = text || '';
     this.el.interactTip.classList.toggle('hidden', !text);
+  }
+
+  // 触屏上下文交互按钮（上车/下车），相同状态不重复写 DOM
+  interactBtn(state) {
+    if (state === this._ibCache) return;
+    this._ibCache = state;
+    const b = this.el.interactBtn;
+    b.classList.toggle('hidden', !state);
+    if (state) b.textContent = state === 'enter' ? '上车' : '下车';
   }
 
   // 背包面板开关：打开时渲染计数并解锁指针（游戏随之暂停），返回是否打开

@@ -206,6 +206,7 @@ export class TouchSource {
           case 'frag': inp.emit('throw', 'frag'); break;
           case 'smoke': inp.emit('throw', 'smoke'); break;
           case 'interact': inp.emit('interact'); break;
+          case 'weapon': inp.emit('weapon'); break; // 无 data = 轮换
         }
       });
       const up = (e) => {

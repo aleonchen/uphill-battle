@@ -53,7 +53,7 @@ export class PlayerController {
     for (const ev of evs) {
       switch (ev.type) {
         case 'reload': g.startReload(p); break;
-        case 'weapon': g.switchWeapon(p, ev.data); break;
+        case 'weapon': g.switchWeapon(p, ev.data == null ? (p.weaponIndex === 0 ? 1 : 0) : ev.data); break;
         case 'med': g.useMed(p, ev.data); break;
         case 'throw': this.throwNade(ev.data); break;
         case 'interact': this.toggleVehicle(); break;
@@ -226,12 +226,13 @@ export class PlayerController {
     this._updateInteractTip();
   }
 
-  // 交互提示（上/下车），DOM 写入去抖在 hud.interact 里
+  // 交互提示（上/下车）：键鼠显文字提示，触屏显上下文按钮（DOM 写入去抖在 hud 里）
   _updateInteractTip() {
     const g = this.game, p = g.player;
-    let tip = null;
+    let tip = null, act = null; // act: 'enter'|'exit'|null → 触屏按钮
     if (p && p.state === 'alive' && g.matchState === 'combat') {
       if (p.inVehicle) {
+        act = 'exit';
         const v = p.inVehicle;
         tip = v.wrecked
           ? '载具已损毁 · F 下车'
@@ -239,11 +240,12 @@ export class PlayerController {
       } else {
         for (const v of g.vehicles) {
           if (v.driver || v.wrecked) continue;
-          if (v.pos.distanceToSquared(p.pos) < 16) { tip = '按 F 上车'; break; }
+          if (v.pos.distanceToSquared(p.pos) < 16) { act = 'enter'; tip = '按 F 上车'; break; }
         }
       }
     }
-    g.hud.interact(tip);
+    g.hud.interact(this.input.isTouch() ? null : tip);
+    g.hud.interactBtn(this.input.isTouch() ? act : null);
   }
 
   // 让枪管指向准星探测点：枪管/枪口/曳光/弹道同一视觉线（仅玩家，bot 远看不出差别）
